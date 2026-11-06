@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "brain4agent"
+version = "0.0.1"
+description = "Long-term memory for agents. Chinese-first, split read/write paths, explicit abstention."
+requires-python = ">=3.11"
+dependencies = []
+
+[project.optional-dependencies]
+# Only what Stage 0 actually needs. Nothing is added before a benchmark
+# number shows it is necessary -- see docs/decisions.md.
+dev = ["pytest>=8"]
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "bench"]
+addopts = "-q --tb=short"
+pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]

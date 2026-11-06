@@ -1,0 +1,43 @@
+{
+  "queries": 470,
+  "hit@1": 0.866,
+  "hit@5": 0.9511,
+  "hit@10": 0.966,
+  "recall@10": 0.9087,
+  "mrr": 0.899,
+  "missed": 16,
+  "by_type": {
+    "knowledge-update": {
+      "n": 72,
+      "hit@10": 1.0,
+      "mrr": 0.9769
+    },
+    "multi-session": {
+      "n": 121,
+      "hit@10": 0.9752,
+      "mrr": 0.8973
+    },
+    "single-session-assistant": {
+      "n": 56,
+      "hit@10": 1.0,
+      "mrr": 1.0
+    },
+    "single-session-preference": {
+      "n": 30,
+      "hit@10": 0.8,
+      "mrr": 0.4656
+    },
+    "single-session-user": {
+      "n": 64,
+      "hit@10": 1.0,
+      "mrr": 0.9701
+    },
+    "temporal-reasoning": {
+      "n": 127,
+      "hit@10": 0.9449,
+      "mrr": 0.8786
+    }
+  },
+  "seconds": 70.03,
+  "errors": 0
+}

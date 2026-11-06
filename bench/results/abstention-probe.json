@@ -1,0 +1,164 @@
+{
+  "dataset": "longmemeval_s_cleaned.json",
+  "n_abstention": 30,
+  "n_answerable": 470,
+  "curve": [
+    {
+      "threshold": 0.0,
+      "abstain_rate": 0.0,
+      "answer_rate": 1.0,
+      "balanced": 0.5
+    },
+    {
+      "threshold": 2.0,
+      "abstain_rate": 0.0,
+      "answer_rate": 1.0,
+      "balanced": 0.5
+    },
+    {
+      "threshold": 4.0,
+      "abstain_rate": 0.0,
+      "answer_rate": 1.0,
+      "balanced": 0.5
+    },
+    {
+      "threshold": 6.0,
+      "abstain_rate": 0.0,
+      "answer_rate": 1.0,
+      "balanced": 0.5
+    },
+    {
+      "threshold": 8.0,
+      "abstain_rate": 0.0,
+      "answer_rate": 1.0,
+      "balanced": 0.5
+    },
+    {
+      "threshold": 10.0,
+      "abstain_rate": 0.0333,
+      "answer_rate": 0.9894,
+      "balanced": 0.5113
+    },
+    {
+      "threshold": 12.0,
+      "abstain_rate": 0.1333,
+      "answer_rate": 0.9532,
+      "balanced": 0.5433
+    },
+    {
+      "threshold": 14.0,
+      "abstain_rate": 0.2,
+      "answer_rate": 0.8915,
+      "balanced": 0.5457
+    },
+    {
+      "threshold": 16.0,
+      "abstain_rate": 0.3,
+      "answer_rate": 0.8277,
+      "balanced": 0.5638
+    },
+    {
+      "threshold": 18.0,
+      "abstain_rate": 0.4667,
+      "answer_rate": 0.7362,
+      "balanced": 0.6014
+    },
+    {
+      "threshold": 20.0,
+      "abstain_rate": 0.5,
+      "answer_rate": 0.6766,
+      "balanced": 0.5883
+    },
+    {
+      "threshold": 22.0,
+      "abstain_rate": 0.7,
+      "answer_rate": 0.6064,
+      "balanced": 0.6532
+    },
+    {
+      "threshold": 24.0,
+      "abstain_rate": 0.8333,
+      "answer_rate": 0.5426,
+      "balanced": 0.6879
+    },
+    {
+      "threshold": 26.0,
+      "abstain_rate": 0.8667,
+      "answer_rate": 0.4745,
+      "balanced": 0.6706
+    },
+    {
+      "threshold": 28.0,
+      "abstain_rate": 0.8667,
+      "answer_rate": 0.417,
+      "balanced": 0.6418
+    },
+    {
+      "threshold": 30.0,
+      "abstain_rate": 0.9,
+      "answer_rate": 0.3787,
+      "balanced": 0.6394
+    },
+    {
+      "threshold": 32.0,
+      "abstain_rate": 0.9,
+      "answer_rate": 0.3362,
+      "balanced": 0.6181
+    },
+    {
+      "threshold": 34.0,
+      "abstain_rate": 0.9333,
+      "answer_rate": 0.2979,
+      "balanced": 0.6156
+    },
+    {
+      "threshold": 36.0,
+      "abstain_rate": 0.9333,
+      "answer_rate": 0.2702,
+      "balanced": 0.6018
+    },
+    {
+      "threshold": 38.0,
+      "abstain_rate": 0.9667,
+      "answer_rate": 0.2383,
+      "balanced": 0.6025
+    },
+    {
+      "threshold": 40.0,
+      "abstain_rate": 0.9667,
+      "answer_rate": 0.1979,
+      "balanced": 0.5823
+    },
+    {
+      "threshold": 42.0,
+      "abstain_rate": 0.9667,
+      "answer_rate": 0.1766,
+      "balanced": 0.5716
+    },
+    {
+      "threshold": 44.0,
+      "abstain_rate": 1.0,
+      "answer_rate": 0.1574,
+      "balanced": 0.5787
+    }
+  ],
+  "best": {
+    "threshold": 24.0,
+    "abstain_rate": 0.8333,
+    "answer_rate": 0.5426,
+    "balanced": 0.6879
+  },
+  "chance_balanced": 0.5,
+  "distributions": {
+    "abstention": {
+      "min": 9.60908455287199,
+      "median": 19.672621087852797,
+      "max": 43.379446380158164
+    },
+    "answerable": {
+      "min": 9.35411199898084,
+      "median": 25.234739404682188,
+      "max": 135.49017091673693
+    }
+  }
+}

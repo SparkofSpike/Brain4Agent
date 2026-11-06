@@ -1,0 +1,18 @@
+# Benchmark data is downloaded, not committed. 264 MB of JSON does not belong
+# in git; bench/fetch_data.py reproduces it byte-for-byte.
+bench/data/
+*.part
+
+# Results are committed on purpose -- they are the evidence behind the
+# decisions in docs/decisions.md, and a number nobody can diff is a rumour.
+
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+*.egg-info/
+build/
+dist/
