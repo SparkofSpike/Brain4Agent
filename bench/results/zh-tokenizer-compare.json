@@ -1,0 +1,37 @@
+{
+  "corpus": {
+    "sessions": 44,
+    "turns": 127,
+    "questions": 59
+  },
+  "bigram": {
+    "hit@1": 0.825,
+    "hit@5": 0.95,
+    "hit@10": 1.0,
+    "mrr": 0.8911,
+    "missed": 0,
+    "abstention_median": 11.74,
+    "answerable_median": 17.17,
+    "best_balance": {
+      "threshold": 15.44,
+      "balanced": 0.6961,
+      "abstain": 0.8421,
+      "answer": 0.55
+    }
+  },
+  "jieba": {
+    "hit@1": 0.875,
+    "hit@5": 0.95,
+    "hit@10": 0.975,
+    "mrr": 0.9098,
+    "missed": 1,
+    "abstention_median": 10.79,
+    "answerable_median": 14.68,
+    "best_balance": {
+      "threshold": 13.09,
+      "balanced": 0.6947,
+      "abstain": 0.7895,
+      "answer": 0.6
+    }
+  }
+}

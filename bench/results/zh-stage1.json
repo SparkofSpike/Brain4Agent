@@ -1,0 +1,18 @@
+{
+  "model": "qwen3.5:9b",
+  "first_pass": 3,
+  "second_pass": 10,
+  "questions": 59,
+  "answerable": 40,
+  "abstention": 19,
+  "answerable_kept": 38,
+  "keep_rate": 0.95,
+  "answered_correctly": 34,
+  "answered_wrong_session": 4,
+  "precision_among_kept": 0.8947,
+  "abstention_refused": 17,
+  "refuse_rate": 0.8947,
+  "judge_errors": 0,
+  "seconds": 230.2,
+  "constraint_keep_ge_0_95": true
+}
