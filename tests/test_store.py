@@ -1,0 +1,176 @@
+"""Tests for the store and evidence layer.
+
+The behaviours pinned here are the ones that would silently corrupt results:
+session-level retrieval, verbatim storage, and ``missing_terms`` telling the
+truth about presence.
+"""
+
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+import pytest
+
+from brain4agent import BM25, MemoryStore, describe, tokenize, word_tokens
+from brain4agent.evidence import question_terms
+
+
+@pytest.fixture()
+def store():
+    with tempfile.TemporaryDirectory() as tmp:
+        db = Path(tmp) / "brain.db"
+        with MemoryStore(db) as s:
+            yield s
+
+
+class TestStoreBasics:
+    def test_add_and_count(self, store: MemoryStore) -> None:
+        sid = store.new_session()
+        store.add("第一条", session_id=sid)
+        store.add("第二条", session_id=sid, role="assistant")
+        assert len(store) == 2
+        assert store.sessions == 1
+
+    def test_empty_content_rejected(self, store: MemoryStore) -> None:
+        """An empty turn would enter the index and match nothing forever."""
+        with pytest.raises(ValueError, match="empty"):
+            store.add("   ")
+
+    def test_exchange_creates_one_session(self, store: MemoryStore) -> None:
+        sid = store.add_exchange(user="问题", assistant="回答")
+        assert len(store.session(sid)) == 2
+        assert store.sessions == 1
+
+    def test_forget_session(self, store: MemoryStore) -> None:
+        sid = store.add_exchange(user="a", assistant="b")
+        other = store.add_exchange(user="c", assistant="d")
+        assert store.forget_session(sid) == 2
+        assert len(store) == 2
+        assert store.sessions == 1
+        assert store.session(other)
+
+    def test_persists_across_reopen(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "brain.db"
+            with MemoryStore(db) as s:
+                s.add("持久化的内容", session_id="s1")
+            with MemoryStore(db) as s2:
+                assert len(s2) == 1
+                assert s2.search("持久化").evidence
+
+    def test_stats(self, store: MemoryStore) -> None:
+        store.add("媒体投稿界面", session_id="s1")
+        st = store.stats()
+        assert st["turns"] == 1
+        assert st["sessions"] == 1
+        assert st["index_terms"] > 0
+
+
+class TestChineseSearch:
+    def test_finds_chinese_session(self, store: MemoryStore) -> None:
+        sid = store.add_exchange(
+            user="中文查询搜不到记忆",
+            assistant="根因在 keywords.py 第 443 行，正则不含汉字",
+        )
+        r = store.search("中文查询为什么搜不到")
+        assert not r.empty
+        assert r.best().session_id == sid
+
+    def test_no_match_is_empty(self, store: MemoryStore) -> None:
+        store.add("媒体投稿界面", session_id="s1")
+        assert store.search("完全不相关的主题").empty
+
+    def test_session_level_not_turn_level(self, store: MemoryStore) -> None:
+        """An answer split across two turns must be visible as one session."""
+        sid = store.new_session()
+        store.add("杭州测试机的情况", session_id=sid, role="user")
+        store.add("上面装的是 PostgreSQL", session_id=sid, role="assistant")
+        r = store.search("杭州测试机上装的是什么数据库")
+        assert not r.empty
+        assert "数据库" in r.best().missing_terms  # 数据库 itself absent
+        # But 测试机 is present across the session, so it must not be missing.
+        assert "测试机" not in r.best().missing_terms
+
+
+class TestMissingTerms:
+    def test_reports_absent_term(self, store: MemoryStore) -> None:
+        store.add("杭州那台测试机的地址是 114.215.175.63", session_id="s1")
+        r = store.search("杭州测试机上装的是什么数据库")
+        assert "数据库" in r.best().missing_terms
+
+    def test_no_missing_when_present(self, store: MemoryStore) -> None:
+        store.add("杭州测试机的地址是 114.215.175.63", session_id="s1")
+        r = store.search("杭州测试机的地址")
+        assert "地址" not in r.best().missing_terms
+
+    def test_coverage_in_range(self, store: MemoryStore) -> None:
+        store.add("媒体投稿的排期文件在 apps/api/data", session_id="s1")
+        r = store.search("媒体投稿排期")
+        for e in r.evidence:
+            assert 0.0 <= e.coverage <= 1.0
+
+    def test_interrogatives_not_reported(self, store: MemoryStore) -> None:
+        terms = question_terms("杭州测试机上装的是什么数据库？")
+        assert "什么" not in terms
+        assert any("数据库" in t or "数据" in t for t in terms)
+
+
+class TestTokenize:
+    def test_chinese_bigrams(self) -> None:
+        assert tokenize("媒体投稿") == ["媒体", "体投", "投稿"]
+
+    def test_single_han_kept(self) -> None:
+        assert tokenize("猫") == ["猫"]
+
+    def test_pure_filler_dropped(self) -> None:
+        assert tokenize("的了") == []
+
+    def test_content_word_survives(self) -> None:
+        """The lesson from neural-memory: 社会 must not be destroyed by 会."""
+        for w in ("社会", "会议", "用户", "更新", "问题"):
+            assert tokenize(w) == [w]
+
+    def test_latin_lowercased(self) -> None:
+        assert tokenize("Hello World") == ["hello", "world"]
+
+    def test_mixed_script(self) -> None:
+        toks = tokenize("v2rayN代理")
+        assert "v2rayn" in toks
+        assert "代理" in toks
+
+    def test_word_tokens_returns_words(self) -> None:
+        """Word-level output should not be bigram soup."""
+        toks = word_tokens("杭州测试机上装的是什么数据库")
+        assert any("数据库" in t for t in toks)
+
+
+class TestBM25:
+    def test_ranks_most_relevant_first(self) -> None:
+        idx = BM25()
+        idx.index([("a", "cat cat cat"), ("b", "cat dog"), ("c", "dog dog")])
+        assert idx.search("cat")[0][0] == "a"
+
+    def test_empty_query(self) -> None:
+        idx = BM25()
+        idx.index([("a", "cat")])
+        assert idx.search("") == []
+
+    def test_empty_index(self) -> None:
+        assert BM25().search("cat") == []
+
+    def test_top_k(self) -> None:
+        idx = BM25()
+        idx.index([(str(i), "cat") for i in range(10)])
+        assert len(idx.search("cat", top_k=3)) == 3
+
+
+class TestDescribe:
+    def test_empty(self, store: MemoryStore) -> None:
+        r = store.search("不存在的内容")
+        assert "no evidence" in describe(r)
+
+    def test_shows_missing(self, store: MemoryStore) -> None:
+        store.add("杭州测试机的地址", session_id="s1")
+        text = describe(store.search("杭州测试机上装的是什么数据库"))
+        assert "missing" in text

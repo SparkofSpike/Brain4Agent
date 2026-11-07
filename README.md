@@ -73,18 +73,67 @@ Stage 1 起才写核心，且只在 Stage 0 指出问题的地方写。
 
 逐篇核实记录在 `docs/research.md`。领域竞品与空白分析在 `docs/landscape.md`。
 
+## 怎么用
+
+```python
+from brain4agent import MemoryStore
+
+with MemoryStore("brain.db") as store:
+    sid = store.new_session()
+    store.add("中文查询搜不到记忆", session_id=sid, role="user")
+    store.add("根因在 keywords.py 第 443 行", session_id=sid, role="assistant")
+
+    result = store.search("中文查询为什么搜不到")
+    best = result.best()
+    print(best.coverage, best.missing_terms)
+```
+
+检索返回**证据**，不返回结论：
+
+```
+>>> store.search("杭州测试机上装的是什么数据库")
+evidence=[Evidence(score=2.70, coverage=0.32, missing_terms=['数据库', '机上'])]
+```
+
+`missing_terms` 直接说明语料里没有「数据库」这个词。这算不算「没记过」，
+由调用方结合上下文判断——它手里已经有模型了。
+
+一次问答用 `add_exchange` 存成一个会话。检索以会话为单位，不是以轮为单位：
+答案常常跨轮，按单轮判断会产生大量假拒答。
+
+### 可选的云端 judge（默认关）
+
+```python
+from brain4agent import Judge, MemoryStore
+
+judge = Judge.from_env()      # 读 BRAIN4AGENT_JUDGE_KEY；没配返回 None
+if judge:
+    r = store.search_judged("问题", judge)
+    print(r.verdict)          # found / not_found / uncertain
+```
+
+`uncertain` 是独立的第三种状态：judge 超时、挂掉、返回无法解析时给这个，
+不给 `not_found`。混为一谈会在网络故障时告诉用户「我从来没记过这件事」。
+
+启用时必须同时有重试和超时——实测 53 次调用里出现过一次 363 秒，
+而 5% 的调用会返回 500/503。
+
 ## 结构
 
 ```
-bench/    Stage 0：评测。先跑基线，再谈实现
-src/      核心实现
-docs/     设计决策与调研
-tests/    测试
+src/brain4agent/
+  tokenize.py   分词与 BM25。bigram 负责匹配，整词负责解释缺了什么
+  store.py      SQLite 存储 + 内存索引，会话为检索单位
+  evidence.py   证据结构。算分可以，下结论不行
+  judge.py      可选云端判断。默认关，没 key 就没有网络调用
+bench/          评测。复用 src 的代码，保证测的和用的是一套
+docs/           设计决策与调研
+tests/          测试
 ```
 
 ## 状态
 
-**Stage 0 完成，Stage 1 已验证。**
+**Stage 0 完成，Stage 1 核心已实现。**
 
 ### 1. 检索不是瓶颈
 
