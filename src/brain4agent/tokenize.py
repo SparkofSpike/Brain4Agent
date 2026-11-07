@@ -81,6 +81,23 @@ def _cjk_bigrams(run: str) -> list[str]:
     return []
 
 
+def _load_jieba():
+    """Import jieba once, with its startup banner silenced.
+
+    The banner goes to stderr and is a full sentence of noise for a CLI user who
+    asked one question. Cached so the import is attempted once per process and
+    the log level is set once.
+    """
+    try:
+        import jieba
+    except ImportError:
+        return None
+    import logging
+
+    jieba.setLogLevel(logging.ERROR)
+    return jieba
+
+
 def word_tokens(text: str) -> list[str]:
     """Whole words, for reporting rather than matching.
 
@@ -88,9 +105,8 @@ def word_tokens(text: str) -> list[str]:
     inference, no accelerator. Falls back to bigrams, which is noisier in a
     report but never wrong about presence.
     """
-    try:
-        import jieba
-    except ImportError:
+    jieba = _load_jieba()
+    if jieba is None:
         return tokenize(text)
 
     out = [w.strip().lower() for w in jieba.lcut(text)]

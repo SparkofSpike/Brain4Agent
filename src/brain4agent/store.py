@@ -81,6 +81,9 @@ class MemoryStore:
         self._db.commit()
         self._index = BM25()
         self._by_session: dict[str, list[Memory]] = {}
+        self._session_text: dict[str, str] = {}
+        self._id_to_session: dict[str, str] = {}
+        self._dirty = False
         self._reload()
 
     # -- lifecycle ---------------------------------------------------------
@@ -99,13 +102,33 @@ class MemoryStore:
             "SELECT id, session_id, role, content, created_at FROM memories ORDER BY created_at"
         ).fetchall()
         self._by_session = {}
+        self._session_text = {}
+        self._id_to_session = {}
         items: list[tuple[str, str]] = []
         for mid, sid, role, content, created in rows:
             mem = Memory(id=mid, session_id=sid, role=role, content=content, created_at=created)
             self._by_session.setdefault(sid, []).append(mem)
+            self._id_to_session[mid] = sid
             items.append((mid, content))
+
+        # One lowered block per session, joined by newline so a term cannot match
+        # across two turns by accident.
+        for sid, turns in self._by_session.items():
+            self._session_text[sid] = "\n".join(m.content.lower() for m in turns)
+
         self._index = BM25()
         self._index.index(items)
+        self._dirty = False
+
+    def _ensure_fresh(self) -> None:
+        """Rebuild the index if writes happened since the last read.
+
+        Rebuilding on every write made importing n turns cost O(n^2); deferring
+        to the next read makes it O(n) once. Nothing is rebuilt for a batch of
+        writes nobody reads.
+        """
+        if self._dirty:
+            self._reload()
 
     # -- write -------------------------------------------------------------
 
@@ -144,10 +167,12 @@ class MemoryStore:
 
         mem = Memory(id=mid, session_id=sid, role=role, content=text, created_at=ts)
         self._by_session.setdefault(sid, []).append(mem)
-        # Rebuild rather than patch: BM25 statistics are global (document
-        # frequencies, average length), so an incremental update would leave them
-        # stale and silently change every score in the corpus.
-        self._reload()
+        self._id_to_session[mid] = sid
+        prev = self._session_text.get(sid)
+        self._session_text[sid] = text.lower() if prev is None else f"{prev}\n{text.lower()}"
+        # Deferred: the next read rebuilds once, so a bulk import does not rebuild
+        # the whole index per turn.
+        self._dirty = True
         return mid
 
     def add_exchange(
@@ -184,6 +209,7 @@ class MemoryStore:
         return len(self._by_session)
 
     def stats(self) -> dict[str, int]:
+        self._ensure_fresh()
         return {
             "turns": len(self),
             "sessions": self.sessions,
@@ -196,11 +222,14 @@ class MemoryStore:
         Returns evidence, not a verdict. Whether a session actually answers the
         question is the caller's call -- see docs/decisions.md D-011.
         """
+        self._ensure_fresh()
         hits = self._index.search(query, top_k=top_k * 3)
         return build_evidence(
             query=query,
             hits=hits,
             by_session=self._by_session,
+            session_text=self._session_text,
+            id_to_session=self._id_to_session,
             sessions_searched=self.sessions,
             top_k=top_k,
         )

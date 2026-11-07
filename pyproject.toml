@@ -4,15 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "brain4agent"
-version = "0.0.1"
+version = "0.1.0"
 description = "Long-term memory for agents. Chinese-first, split read/write paths, explicit abstention."
 requires-python = ">=3.11"
 dependencies = []
+
+[project.scripts]
+brain4agent = "brain4agent.cli:main"
 
 [project.optional-dependencies]
 # Only what Stage 0 actually needs. Nothing is added before a benchmark
 # number shows it is necessary -- see docs/decisions.md.
 dev = ["pytest>=8"]
+# Raises the quality of missing_terms: a real dictionary splits 数据库 as one
+# word instead of 数据 + 据库. Not required -- without it the report falls back
+# to bigrams, which is noisier but never wrong about presence.
+precise = ["jieba>=0.42"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

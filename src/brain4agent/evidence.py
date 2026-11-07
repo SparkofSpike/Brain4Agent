@@ -20,7 +20,6 @@ read it without knowing what a BM25 score of 13.4 means.
 from __future__ import annotations
 
 import math
-from collections import Counter
 from dataclasses import dataclass, field
 from typing import Protocol
 
@@ -147,39 +146,36 @@ def build_evidence(
     query: str,
     hits: list[tuple[str, float]],
     by_session: dict[str, list[_MemoryLike]],
+    session_text: dict[str, str],
+    id_to_session: dict[str, str],
     sessions_searched: int,
     top_k: int,
 ) -> SearchResult:
-    """Turn ranked memory ids into ranked session evidence."""
+    """Turn ranked memory ids into ranked session evidence.
+
+    Presence is checked by substring, not by token set. For the question this
+    answers -- does the corpus contain the word 数据库 -- substring matching is
+    both exact and cheap, and it avoids tokenising the whole corpus on every
+    search. Tokenising for presence would also be wrong in the other direction:
+    a session containing 数据 and 存量 separately is not a session about
+    数据库, but a bag of bigrams says it is.
+    """
     if not hits:
         return SearchResult(
             query=query, evidence=[], corpus_terms=0, sessions_searched=sessions_searched
         )
 
-    # Corpus statistics for the IDF weighting.
-    df: Counter[str] = Counter()
-    n_turns = 0
-    id_to_session: dict[str, str] = {}
-    session_tokens: dict[str, set[str]] = {}
+    q_terms = question_terms(query)
+    if not q_terms:
+        q_terms = []
 
-    for sid, turns in by_session.items():
-        toks: set[str] = set()
-        for turn in turns:
-            id_to_session[turn.id] = sid
-            n_turns += 1
-            from brain4agent.tokenize import tokenize
-
-            toks.update(tokenize(turn.content))
-            toks.update(word_tokens(turn.content))
-        session_tokens[sid] = toks
-        for t in toks:
-            df[t] += 1
+    n_sessions = len(by_session) or 1
+    texts = list(session_text.values())
 
     def idf(term: str) -> float:
-        d = df.get(term, 0)
-        return math.log(1.0 + (n_turns - d + 0.5) / (d + 0.5))
+        d = sum(1 for t in texts if term in t)
+        return math.log(1.0 + (n_sessions - d + 0.5) / (d + 0.5))
 
-    q_terms = question_terms(query)
     total_weight = sum(idf(t) for t in q_terms) or 1.0
 
     evidence: list[Evidence] = []
@@ -190,9 +186,9 @@ def build_evidence(
             continue
         seen.add(sid)
 
-        tokens = session_tokens.get(sid, set())
-        present = [t for t in q_terms if t in tokens]
-        missing = [t for t in q_terms if t not in tokens]
+        text = session_text.get(sid, "")
+        present = [t for t in q_terms if t in text]
+        missing = [t for t in q_terms if t not in text]
         covered = sum(idf(t) for t in present)
 
         first = by_session[sid][0]
@@ -207,10 +203,11 @@ def build_evidence(
         if len(evidence) >= top_k:
             break
 
+    corpus_terms = sum(1 for t in q_terms if any(t in x for x in texts))
     return SearchResult(
         query=query,
         evidence=evidence,
-        corpus_terms=len(df),
+        corpus_terms=corpus_terms,
         sessions_searched=sessions_searched,
     )
 

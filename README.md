@@ -75,6 +75,30 @@ Stage 1 起才写核心，且只在 Stage 0 指出问题的地方写。
 
 ## 怎么用
 
+命令行最快：
+
+```bash
+# 装：pip install -e .        （只需 Python 3.11+，无必装依赖）
+$ brain4agent exchange \
+    "中文查询搜不到记忆，nmem recall 返回空" \
+    "根因在 keywords.py 第 443 行，正则不含汉字范围"
+
+$ brain4agent search "中文查询为什么搜不到"
+1 sessions for '中文查询为什么搜不到'
+  [ 6.08 cov=1.00] e9d4c39a3790
+
+--- e9d4c39a3790  score=6.08  coverage=1.00 ---
+user: 中文查询搜不到记忆，nmem recall 返回空
+assistant: 根因在 keywords.py 第 443 行，正则不含汉字范围
+
+$ brain4agent search "杭州测试机上装的是什么数据库"
+  [ 3.39 cov=0.34] 2287920753f2  missing: 数据库, 机上
+```
+
+`missing:` 那一行是重点。它不是「没找到」，是「语料里没有『数据库』这个词」。
+
+作为库用：
+
 ```python
 from brain4agent import MemoryStore
 
