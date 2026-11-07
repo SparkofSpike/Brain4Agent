@@ -1,0 +1,42 @@
+{
+  "n": 59,
+  "features": [
+    "top1",
+    "mean5",
+    "nqc",
+    "uqc",
+    "wig",
+    "clarity",
+    "coverage",
+    "corpus_missing",
+    "q_terms",
+    "t_what",
+    "t_why",
+    "t_howmany",
+    "t_how"
+  ],
+  "loo": {
+    "best_balanced": 0.7447,
+    "keep": 0.7,
+    "refuse": 0.7895,
+    "threshold": 0.32,
+    "refuse_at_keep_95": 0.2105
+  },
+  "coverage_alone_refuse_at_keep_95": 0.1053,
+  "llm_reference": 0.895,
+  "weights_full_fit": {
+    "top1": -0.5416,
+    "mean5": 0.1931,
+    "nqc": -0.1227,
+    "uqc": -0.3879,
+    "wig": 0.5021,
+    "clarity": 0.0131,
+    "coverage": -0.0742,
+    "corpus_missing": 0.5036,
+    "q_terms": -0.3416,
+    "t_what": -0.6157,
+    "t_why": -0.7813,
+    "t_howmany": 0.8594,
+    "t_how": -0.7156
+  }
+}

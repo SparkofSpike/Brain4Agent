@@ -69,7 +69,9 @@ Stage 1 起才写核心，且只在 Stage 0 指出问题的地方写。
 | 2305.10250 | MemoryBank：遗忘曲线 |
 | 2304.03442 | Generative Agents：memory stream + reflection |
 
-逐篇核实记录在 `docs/research.md`。
+| 2504.01101 | QPP 的局限：预测器不泛化、下游收益边际 |
+
+逐篇核实记录在 `docs/research.md`。领域竞品与空白分析在 `docs/landscape.md`。
 
 ## 结构
 

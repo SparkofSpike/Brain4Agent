@@ -1,0 +1,53 @@
+{
+  "questions": 59,
+  "predictors": {
+    "nqc": {
+      "balanced": 0.668,
+      "keep": 0.6,
+      "refuse": 0.737,
+      "threshold": 0.6223,
+      "flipped": 0.0,
+      "refuse_at_keep_95": 0.158
+    },
+    "uqc": {
+      "balanced": 0.709,
+      "keep": 0.575,
+      "refuse": 0.842,
+      "threshold": 3.9793,
+      "flipped": 0.0,
+      "refuse_at_keep_95": 0.158
+    },
+    "wig": {
+      "balanced": 0.676,
+      "keep": 0.825,
+      "refuse": 0.526,
+      "threshold": 0.0,
+      "flipped": 0.0,
+      "refuse_at_keep_95": 0.0
+    },
+    "clarity": {
+      "balanced": 0.595,
+      "keep": 0.875,
+      "refuse": 0.316,
+      "threshold": 1.7251,
+      "flipped": 0.0,
+      "refuse_at_keep_95": 0.105
+    },
+    "top1": {
+      "balanced": 0.696,
+      "keep": 0.55,
+      "refuse": 0.842,
+      "threshold": 15.8527,
+      "flipped": 0.0,
+      "refuse_at_keep_95": 0.158
+    },
+    "top1_minus_top10": {
+      "balanced": 0.674,
+      "keep": 0.4,
+      "refuse": 0.947,
+      "threshold": 18.1725,
+      "flipped": 0.0,
+      "refuse_at_keep_95": 0.105
+    }
+  }
+}
