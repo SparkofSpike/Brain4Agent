@@ -1,0 +1,17 @@
+{
+  "model": "deepseek-flash",
+  "questions": 59,
+  "answerable": 40,
+  "abstention": 19,
+  "keep_rate": 0.925,
+  "refuse_rate": 1.0,
+  "constraint_keep_ge_0_95": false,
+  "judge_calls": 109,
+  "errors": 0,
+  "latency_mean_s": 0.807,
+  "latency_min_s": 0.413,
+  "latency_max_s": 1.611,
+  "prompt_tokens": 16633,
+  "completion_tokens": 6674,
+  "tokens_per_call": 213.8
+}
