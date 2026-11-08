@@ -1903,3 +1903,37 @@ probe. The earlier count came from a smaller sample with a different filter path
 neither number is authoritative. The detector matches common GBK-misread Han
 characters and is a heuristic, not a validator — worth remembering before quoting
 a "34 mojibake rows" figure again.
+
+---
+
+## D-034 The MCP config pointed at a database that did not exist
+
+**Context.** Switching the machine's memory from nmem to b4a. Before editing the
+config I checked where the two servers actually read from.
+
+**Finding.** `mcp.json` set `BRAIN4AGENT_DB` to `/var/lib/b4a\tmp\b4a-real.db`.
+That file does not exist. The 2893 imported memories were in `b4a-nmem.db`. So
+every b4a tool call since the import had been creating an empty database at a new
+path and answering from it. The import in D-033 was real, and the memories were
+real, but the MCP server was not reading them.
+
+**Why it survived a session.** The empty store answers every query honestly:
+zero results, `corpus_missing` listing the terms. An empty store and a store
+that has never heard of something produce the same evidence. D-031 found that
+two memory servers confuse tool selection; this is the same failure one layer
+down -- the server was selected correctly and read the wrong file.
+
+**Fix.** `b4a.db` is now the main store, copied from `b4a-nmem.db`, and
+`BRAIN4AGENT_DB` points at it. `b4a-nmem.db` stays untouched as the experiment
+corpus for `bench/nmem/` and as a rollback point.
+
+**Migration policy.** New memories go to b4a only. nmem stays read-only for
+anything written before 2026-11-08. Its 2893 fibers are already in b4a, so in
+practice there is nothing left to read from nmem; it is kept for a month as a
+rollback path and then removed. Where b4a lacks a capability -- cross-session
+aggregation, recap-style summaries -- the answer is that it lacks it, not that
+nmem should be used to cover the gap.
+
+**Verified.** `b4a search` for a known ProjectX_3.0 memory returns 3 sessions from the
+main store; the MCP handshake reports `db=/var/lib/b4a\tmp\b4a.db` and lists
+`b4a_remember`, `b4a_recall`, `b4a_ask`, `b4a_session`, `b4a_stats`.
