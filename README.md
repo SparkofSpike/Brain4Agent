@@ -560,6 +560,9 @@ first benchmarks were written.
 - **Near-duplicate detection.** A SimHash fingerprint per memory; `search` returns
   `possible_duplicates` when two memories may state the same thing. It reports and
   does not merge — the calling agent reads both and decides (D-028).
+- **Weight.** `reinforce` raises it, `decay` lowers it, `prune_by_weight` deletes
+  what fell below a threshold. This is the first forgetting signal here that is
+  not about age: a retrieved memory survives, an unretrieved one decays (D-029).
 
 **Recently fixed:**
 
@@ -577,8 +580,10 @@ first benchmarks were written.
   weighs importance rather than age is the next real piece of work.
 - **A recall scheduler.** `recall-context` exists for hooks, but nothing decides
   when to run it. Every-turn is cheap (1.5 ms) and probably too noisy.
-- **Frequency-based ranking.** `accesses` is counted on every search; nothing ranks
-  by it. A hypothesis waiting for a measurement, not an oversight.
+- **Frequency-based ranking.** `accesses` is counted and `weight` can blend into
+  ranking via `weight_blend`, but the default is off. The mechanism is tested;
+  whether it *helps* is unmeasured, and an unmeasured signal reordering results is
+  the kind of change this project keeps refusing to make.
 - **Multi-retriever fusion.** One BM25 today. A second lexical retriever could be
   tried without breaking the model-free rule.
 - **Schema on `kind`.** It is a free-form string with no validation.
