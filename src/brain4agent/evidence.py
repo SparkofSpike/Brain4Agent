@@ -219,23 +219,29 @@ def build_evidence(
     a session containing 数据 and 存量 separately is not a session about
     数据库, but a bag of bigrams says it is.
     """
-    if not hits:
-        return SearchResult(
-            query=query, evidence=[], corpus_terms=0, sessions_searched=sessions_searched
-        )
-
     q_terms = question_terms(query)
-    if not q_terms:
-        q_terms = []
 
-    n_sessions = len(by_session) or 1
+    # Computed before the empty-hits early return. "Nothing matched" and "the
+    # corpus has never contained 数据库" are different answers, and the second is
+    # what explains the first -- dropping it exactly when nothing matched threw
+    # away the only useful part of an empty result.
+    #
+    # Checked once against the joined corpus, not per session: 用户 missing from
+    # one session says nothing, 用户 missing from every session says everything.
     texts = list(session_text.values())
-
-    # A term the whole corpus lacks. Checked once against the joined corpus, not
-    # per session: 用户 missing from one session says nothing, 用户 missing from
-    # every session says everything.
     joined = "\n".join(texts)
     corpus_missing = [t for t in q_terms if t not in joined]
+
+    if not hits:
+        return SearchResult(
+            query=query,
+            evidence=[],
+            corpus_terms=0,
+            sessions_searched=sessions_searched,
+            corpus_missing=corpus_missing,
+        )
+
+    n_sessions = len(by_session) or 1
 
     def idf(term: str) -> float:
         d = sum(1 for t in texts if term in t)

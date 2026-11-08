@@ -181,6 +181,15 @@ class TestMissingTerms:
         assert not r.corpus_missing
         assert any("用户" in e.missing_terms for e in r.evidence)
 
+    def test_corpus_missing_survives_empty_result(self, store: MemoryStore) -> None:
+        """The empty path used to skip the computation entirely, dropping the one
+        signal that explains why nothing matched."""
+        store.add("杭州测试机的地址是 203.0.113.42", session_id="s1")
+        r = store.search("zzzqqqxxx")
+        assert r.empty
+        assert r.corpus_missing == ["zzzqqqxxx"]
+        assert r.sessions_searched == 1
+
     def test_coverage_in_range(self, store: MemoryStore) -> None:
         store.add("媒体投稿的排期文件在 apps/api/data", session_id="s1")
         r = store.search("媒体投稿排期")
