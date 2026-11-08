@@ -253,8 +253,18 @@ def build_evidence(
 
     n_sessions = len(by_session) or 1
 
+    # Memoised. idf(term) is called once per query term for the weight total and
+    # again for every evidence row's coverage, so the same term was rescanned up
+    # to top_k+1 times over the whole corpus. Measured: build_evidence was 10.9 ms
+    # of a 13.8 ms query, and almost all of it was re-walking texts looking for
+    # words it had already looked for.
+    _df_cache: dict[str, int] = {}
+
     def idf(term: str) -> float:
-        d = sum(1 for t in texts if term in t)
+        d = _df_cache.get(term)
+        if d is None:
+            d = sum(1 for t in texts if term in t)
+            _df_cache[term] = d
         return math.log(1.0 + (n_sessions - d + 0.5) / (d + 0.5))
 
     total_weight = sum(idf(t) for t in q_terms) or 1.0

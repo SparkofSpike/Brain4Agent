@@ -191,6 +191,15 @@ class BM25:
         self._avgdl: float = 0.0
         self._n: int = 0
         self._order: dict[str, int] = {}
+        # term -> [(doc index, term frequency)]. The point of an inverted index
+        # here is not elegance: without it, every query walks all documents and
+        # the cost grows linearly with the corpus. Measured before adding it:
+        # 20k documents took 144 ms per query and rising.
+        self._postings: dict[str, list[tuple[int, int]]] = {}
+        # Precomputed because idf depends only on df and n, and both are fixed
+        # once indexing finishes. Recomputing it per (query, document, term) was
+        # three logarithms per pair.
+        self._idf: dict[str, float] = {}
 
     def __len__(self) -> int:
         return self._n
@@ -216,16 +225,22 @@ class BM25:
         self._docs = []
         self._lens = []
         self._df = Counter()
+        self._postings = {}
 
-        for _, toks in items:
+        for idx, (_, toks) in enumerate(items):
             counts = Counter(toks)
             self._docs.append(counts)
             self._lens.append(sum(counts.values()))
-            for term in counts:
+            for term, tf in counts.items():
                 self._df[term] += 1
+                self._postings.setdefault(term, []).append((idx, tf))
 
         self._n = len(items)
         self._avgdl = (sum(self._lens) / self._n) if self._n else 0.0
+        self._idf = {
+            term: math.log(1.0 + (self._n - df + 0.5) / (df + 0.5))
+            for term, df in self._df.items()
+        }
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         if not self._n:
@@ -234,18 +249,29 @@ class BM25:
         if not q_terms:
             return []
 
+        # Only documents containing at least one query term can score above zero,
+        # so walk the postings instead of the corpus. A query with one rare term
+        # touches a handful of documents out of tens of thousands.
+        candidates: set[int] = set()
+        for term in q_terms:
+            posting = self._postings.get(term)
+            if posting:
+                candidates.update(idx for idx, _ in posting)
+        if not candidates:
+            return []
+
+        avgdl = self._avgdl or 1.0
         scores: list[tuple[str, float]] = []
-        for idx, counts in enumerate(self._docs):
+        for idx in candidates:
+            counts = self._docs[idx]
             dl = self._lens[idx]
+            norm = self.k1 * (1.0 - self.b + self.b * dl / avgdl)
             score = 0.0
             for term in q_terms:
                 tf = counts.get(term, 0)
                 if not tf:
                     continue
-                df = self._df.get(term, 0)
-                idf = math.log(1.0 + (self._n - df + 0.5) / (df + 0.5))
-                denom = tf + self.k1 * (1.0 - self.b + self.b * dl / (self._avgdl or 1.0))
-                score += idf * (tf * (self.k1 + 1.0)) / denom
+                score += self._idf[term] * (tf * (self.k1 + 1.0)) / (tf + norm)
             if score > 0.0:
                 scores.append((self._ids[idx], score))
 

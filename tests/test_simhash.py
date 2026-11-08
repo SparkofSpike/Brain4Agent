@@ -76,12 +76,20 @@ class TestStoreIntegration:
             # because that predecessor is superseded and therefore skipped.
             assert s.duplicates_of(new) == []
 
-    def test_surfaces_in_search(self, tmp_path: Path) -> None:
+    def test_duplicates_are_not_on_the_search_path(self, tmp_path: Path) -> None:
+        """Search must not pay for a corpus-wide scan on every query.
+
+        Measured: the duplicate pass was 5 ms against 2893 memories, more than
+        half of a query that otherwise takes 4 ms. It answers a maintenance
+        question, so it is available through duplicates_of() and stays off the
+        retrieval path.
+        """
         with MemoryStore(tmp_path / "s.db") as s:
-            s.add("主库是 MySQL 8.0，部署在 192.0.2.10", session_id="jan")
+            a = s.add("主库是 MySQL 8.0，部署在 192.0.2.10", session_id="jan")
             s.add("主库是 MySQL 8.0，部署在 192.0.2.11", session_id="feb")
             hits = s.search("主库", top_k=5)
-            assert any(e.possible_duplicates for e in hits.evidence)
+            assert all(not e.possible_duplicates for e in hits.evidence)
+            assert s.duplicates_of(a)
 
     def test_no_false_positive_on_one_memory(self, tmp_path: Path) -> None:
         with MemoryStore(tmp_path / "s.db") as s:

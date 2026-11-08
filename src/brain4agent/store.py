@@ -163,6 +163,13 @@ class MemoryStore:
         self._b = bm25_b
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self.path))
+        # WAL: access counters are written on every search, and the default
+        # rollback journal fsyncs the whole file per commit -- measured 2.5 ms
+        # per single-row UPDATE, which dominated a 13 ms query. WAL makes the
+        # same write ~0.05 ms. It also allows a reader and a writer at once,
+        # which matters for an MCP server serving one agent while a CLI reads.
+        self._db.execute("PRAGMA journal_mode=WAL")
+        self._db.execute("PRAGMA synchronous=NORMAL")
         self._db.executescript(SCHEMA)
         self._migrate(self._db)
         self._db.commit()
@@ -920,10 +927,12 @@ class MemoryStore:
         if not result.evidence:
             return result
 
-        enriched = []
-        for e in result.evidence:
-            dups = self.duplicates_of(e.memory.id)
-            enriched.append(dc_replace(e, possible_duplicates=dups) if dups else e)
+        # Duplicate detection is deliberately absent from this path. It is a
+        # linear scan over the corpus -- 5 ms against 2893 memories, more than
+        # half the cost of a query that otherwise takes 4 ms -- and it answers a
+        # maintenance question, not a retrieval one. Callers that want it call
+        # duplicates_of(id), or the MCP tool exposes it separately.
+        enriched = list(result.evidence)
 
         ids = [(e.memory.id,) for e in result.evidence]
         with self._db:
