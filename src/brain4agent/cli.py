@@ -90,6 +90,78 @@ def cmd_exchange(args: argparse.Namespace) -> int:
         store.close()
 
 
+def _read_prompt() -> str:
+    """Read a prompt from stdin, whatever encoding the shell handed us.
+
+    Windows is the reason this exists. ``sys.stdin.read()`` decodes with the
+    locale codec (cp936 on a Chinese system), so UTF-8 bytes arrive as mojibake
+    and a Chinese prompt matches nothing. PowerShell may also hand over UTF-16
+    with a BOM when it is piping a string rather than a file. Neither failure is
+    loud: the search just returns nothing.
+    """
+    raw = sys.stdin.buffer.read()
+    if not raw.strip():
+        return ""
+    if raw.startswith((b"\xff\xfe", b"\xfe\xff")):
+        return raw.decode("utf-16", errors="replace").strip()
+    return raw.decode("utf-8-sig", errors="replace").strip()
+
+
+def cmd_recall_context(args: argparse.Namespace) -> int:
+    """Print memory relevant to a prompt read from stdin, ready to inject.
+
+    MCP is pull-only: a server cannot volunteer a memory, so an agent sees one
+    only when it decides to call ``b4a_recall``. That covers "the user asked
+    about something from before" and misses "the task is about to touch
+    something we have context on". A client can close that gap with a hook --
+    run this before handing the prompt to the model and prepend the output --
+    but only if the output is already shaped for injection and silent when
+    there is nothing worth saying.
+
+    Silence is the common case. A hook that emits "no memories found" every turn
+    trains the model to skip the block entirely.
+    """
+    prompt = _read_prompt()
+    if not prompt:
+        return 0
+
+    store = _open(args)
+    blocks: list[str] = []
+    try:
+        result = store.search(prompt, top_k=args.top_k, tags=tuple(args.tags) or None)
+        if result.empty:
+            return 0
+
+        header = (
+            "## Possibly relevant memory\n\n"
+            "Excerpts from earlier sessions on this machine, retrieved by keyword\n"
+            "match. They may be about a different task. Use them only if they help,\n"
+            "and say when you are relying on one.\n"
+        )
+        used = len(header)
+        for e in result.evidence:
+            text = store.session_text(e.session_id).strip()
+            if not text:
+                continue
+            block = f"\n[{e.session_id} · coverage {e.coverage:.2f}]\n{text}"
+            if used + len(block) > args.max_chars:
+                remaining = args.max_chars - used
+                if remaining < 200:
+                    break
+                block = block[:remaining] + "\n…"
+            blocks.append(block)
+            used += len(block)
+            if used >= args.max_chars:
+                break
+    finally:
+        store.close()
+
+    if not blocks:
+        return 0
+    sys.stdout.write(header + "".join(blocks) + "\n")
+    return 0
+
+
 def cmd_search(args: argparse.Namespace) -> int:
     store = _open(args)
     try:
@@ -272,6 +344,14 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--top-k", "-k", type=int, default=3)
     s.add_argument("--tag", action="append", dest="tags", default=[], help="filter; repeatable")
     s.set_defaults(func=cmd_search)
+
+    rc = sub.add_parser(
+        "recall-context", help="print memory relevant to a prompt on stdin (for hooks)"
+    )
+    rc.add_argument("--top-k", "-k", type=int, default=3)
+    rc.add_argument("--max-chars", type=int, default=1500)
+    rc.add_argument("--tag", action="append", dest="tags", default=[])
+    rc.set_defaults(func=cmd_recall_context)
 
     q = sub.add_parser("ask", help="retrieve and answer in one step")
     q.add_argument("query")

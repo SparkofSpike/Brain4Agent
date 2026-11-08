@@ -122,15 +122,12 @@ def main() -> int:
     print(f"queries: {len(queries)} across {len({q['user_id'] for q in queries})} samples")
     print()
 
-    with tempfile.TemporaryDirectory() as td:
-        with MemoryStore(Path(td) / "locomo.db") as store:
-            import_corpus(store, documents)
-            retrieved: dict[str, list[str]] = {}
-            for q in queries:
-                result = store.search(
-                    q["query"], top_k=10, tags=[f"sample:{q['user_id']}"]
-                )
-                retrieved[q["id"]] = [e.session_id for e in result.evidence]
+    with tempfile.TemporaryDirectory() as td, MemoryStore(Path(td) / "locomo.db") as store:
+        import_corpus(store, documents)
+        retrieved: dict[str, list[str]] = {}
+        for q in queries:
+            result = store.search(q["query"], top_k=10, tags=[f"sample:{q['user_id']}"])
+            retrieved[q["id"]] = [e.session_id for e in result.evidence]
 
     r = score(queries, retrieved)
     print(f"answerable: {r['answerable']}")

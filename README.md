@@ -466,7 +466,7 @@ because a README that only lists strengths is a sales page.
 | Multi-retriever fusion | **Not built.** One retriever: BM25 over bigrams and optionally jieba words. |
 | Forgetting / consolidation | **Crude.** `prune(keep_sessions=N)` is recency-based size control, not retrieval improvement. Recovering a noisy corpus needs deleting 95% of it — emptying, not forgetting (D-022). |
 | Cross-session aggregation | **Not built.** Explicitly out of scope so far. |
-| Proactive recall | **Not built.** Retrieval is caller-initiated. |
+| Proactive recall | **Partial.** `recall-context` reads a prompt from stdin and prints formatted memory, silent when nothing matches — built for a client-side hook, since MCP is pull-only and a server cannot volunteer a memory. No scheduler: the client decides when to run it. See `integrations/hooks/`. |
 | Multimodal | **Not built.** |
 | Hallucination defence | **Partial.** Evidence/verdict separation, `corpus_missing`, three-state judge results. Nothing that detects a wrong answer produced from a correct retrieval. |
 | Reproducibility of published numbers | **Strong.** Three benchmarks, two with no model in the loop at all. This is the axis where the project is ahead of most of the field, and it is a consequence of the model-free rule rather than a goal in itself. |
