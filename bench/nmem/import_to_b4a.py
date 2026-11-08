@@ -20,8 +20,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "src"))
 
-from brain4agent.store import MemoryStore  # noqa: E402
 from bench.nmem.prune_probe import is_mojibake  # noqa: E402
+from brain4agent.store import MemoryStore  # noqa: E402
 
 DEFAULT_DB = os.path.expanduser(r"~\.neuralmemory\brains\default.db")
 
@@ -63,7 +63,9 @@ def load(db_path: str) -> list[dict]:
                 "tags": tags[:4],
             }
         )
-    print(f"fibers: {len(rows)}  usable: {len(out)}  mojibake: {skipped_moji}  empty: {skipped_empty}")
+    print(
+        f"fibers: {len(rows)}  usable: {len(out)}  mojibake: {skipped_moji}  empty: {skipped_empty}"
+    )
     return out
 
 
