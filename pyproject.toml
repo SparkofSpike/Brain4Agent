@@ -17,7 +17,10 @@ brain4agent = "brain4agent.cli:main"
 [project.optional-dependencies]
 # Only what Stage 0 actually needs. Nothing is added before a benchmark
 # number shows it is necessary -- see docs/decisions.md.
-dev = ["pytest>=8", "ruff>=0.6"]
+# Pinned on purpose. A floor of 0.6 let CI install 0.17.4 while this machine had
+# 0.16.2, and 0.17.4 added an F841 rule that flagged two test files the local
+# linter had passed for weeks. A gate whose rules change under you is not a gate.
+dev = ["pytest>=8", "ruff==0.17.4"]
 # Not a hard requirement, but the single biggest retrieval win measured so
 # far: dictionary segmentation takes hit@1 from 0.825 to 0.925 (D-019).
 # Without it the core falls back to bigrams on both sides and still works.

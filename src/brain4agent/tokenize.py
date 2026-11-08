@@ -238,8 +238,7 @@ class BM25:
         self._n = len(items)
         self._avgdl = (sum(self._lens) / self._n) if self._n else 0.0
         self._idf = {
-            term: math.log(1.0 + (self._n - df + 0.5) / (df + 0.5))
-            for term, df in self._df.items()
+            term: math.log(1.0 + (self._n - df + 0.5) / (df + 0.5)) for term, df in self._df.items()
         }
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:

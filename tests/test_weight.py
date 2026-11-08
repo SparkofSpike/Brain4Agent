@@ -102,7 +102,7 @@ class TestPruneByWeight:
 class TestWeightBlend:
     def test_zero_is_a_no_op(self, tmp_path: Path) -> None:
         with MemoryStore(tmp_path / "b.db") as s:
-            a = s.add("主库是 MySQL 8.0", session_id="a")
+            s.add("主库是 MySQL 8.0", session_id="a")
             b = s.add("主库是 MySQL 8.0", session_id="b")
             for _ in range(5):
                 s.reinforce(b)
@@ -114,7 +114,7 @@ class TestWeightBlend:
 
     def test_blend_reorders_by_weight(self, tmp_path: Path) -> None:
         with MemoryStore(tmp_path / "b.db") as s:
-            a = s.add("主库是 MySQL 8.0", session_id="a")
+            s.add("主库是 MySQL 8.0", session_id="a")
             b = s.add("主库是 MySQL 8.0", session_id="b")
             for _ in range(5):
                 s.reinforce(b)
