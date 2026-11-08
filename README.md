@@ -524,7 +524,9 @@ detect this from inside; it looks exactly like an empty memory.
 
 A direct MCP handshake proved `b4a` was healthy, so the failure was at selection,
 not retrieval. One memory server per agent, or names that make the choice
-unambiguous.
+unambiguous. Harnesses that namespace MCP tools by server — mcp__b4a__b4a_recall
+— cannot hit this; the collision needs two servers exposing similarly named
+memory tools.
 
 ## Against the frontier
 

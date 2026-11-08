@@ -1759,3 +1759,72 @@ integration, and it failed in a way only an integration test could show.
 wrote the memories himself. This establishes that the mechanism is usable and
 that co-existence is a hazard. It does not establish that a real user's memory
 corpus is retrievable in practice — that needs weeks, not one session.
+---
+
+## D-032 Cross-harness comparison: dsh was clean, Codewhale was not
+
+**Context.** D-031 found that Codewhale, with `neural-memory` and `b4a` both
+enabled, queried the wrong memory server and reported "no record" while the
+answer was in `b4a`. The user's follow-up was the right control: Codewhale has
+used nmem for months, so try `dsh` — DeepSeek Harness — which is rarely used here
+and has no nmem habit.
+
+**Setup.** `dsh` boots from a profile stack. The MCP entry lives in
+`$DSH_HOME/cordis.patch.yml`:
+
+```yaml
+- id: mcp-b4a
+  name: '@deepseek-ai/dsh-mcp-client'
+  config:
+    serverName: b4a
+    transport: stdio
+    command: 'python'
+    args: ['-X', 'utf8', '-m', 'brain4agent.mcp_server']
+    env: {BRAIN4AGENT_DB: ..., PYTHONPATH: ..., PYTHONUTF8: '1'}
+```
+
+Tools surface as `mcp__b4a__b4a_recall`, so a namespace collision with another
+server is structurally impossible — the failure mode D-031 ran into cannot occur
+in dsh's naming scheme.
+
+**Measured.** Same five memories, same questions, `dsh --profile headless`.
+
+Question 1 — code style, release policy, test server:
+
+- cited `p1`, `d1`, `o1` with session ids and quoted text
+- reported `corpus_missing` for `lint` / `格式化` / `风格` and said so explicitly
+- flagged `198.51.100.23` as RFC 5737 TEST-NET-2, non-routable, probably seed data
+- stated at the end: "以上是记忆库里查到的情况，未做推断"
+
+Question 2 — what test framework CI uses and why:
+
+- separated three sources without being asked: what the repo contains, what the
+  decision log contains, and what has no record at all
+- grepped `docs/decisions.md` for `pytest`, found zero hits, and said the *reason*
+  is not archived anywhere
+- offered to record it, rather than inventing one
+
+Its own reasoning trace contains the line: *"I did NOT query the AGENTS.md/repo
+conventions as memory."* That is the distinction the experiment was testing for,
+and it made it unprompted.
+
+**What this establishes.**
+
+1. **The store works in a harness that has no competing memory server.** Two
+   independent agents, two protocols, same result.
+2. **D-031's failure was selection, not retrieval** — confirmed by the contrast.
+   Same memories, same questions, different harness, no failure.
+3. **Server-qualified tool names prevent the collision by construction.**
+   `mcp__b4a__b4a_recall` cannot be confused with another server's `recall`. The
+   codewhale failure happened because two servers both exposed memory tools and
+   the agent chose one. dsh's naming makes the choice explicit in the tool name
+   itself.
+
+**What this does not establish.** Two agents and four questions is a smoke test,
+not a trial. Both agents were asked about memories I wrote, with wording I chose,
+ten minutes earlier. The interesting question — does a real corpus with hundreds
+of memories surface the right one under real questions — is untouched.
+
+**Action taken.** None in the store. The dsh config change lives outside the
+repo; a copy is kept in this entry so it can be reconstructed. `cordis.patch.yml`
+was backed up before editing and the temporary store was deleted afterwards.
