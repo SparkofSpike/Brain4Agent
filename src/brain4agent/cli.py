@@ -71,7 +71,7 @@ def cmd_search(args: argparse.Namespace) -> int:
             print()
             print(f"--- {e.session_id}  score={e.score:.2f}  coverage={e.coverage:.2f} ---")
             if e.missing_terms:
-                print(f"missing: {', '.join(e.missing_terms)}")
+                print(f"this session lacks: {', '.join(e.missing_terms)}")
             print(store.session_text(e.session_id))
         return 0
     finally:

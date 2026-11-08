@@ -99,7 +99,7 @@ class TestTools:
         call(server, "memory_remember", {"content": "杭州测试机的地址是 114.215.175.63"})
         out = call(server, "memory_recall", {"query": "杭州测试机上装的是什么数据库"})
         payload = json.loads(text_of(out))
-        assert "数据库" in payload["evidence"][0]["missing_terms"]
+        assert "数据库" in payload["corpus_missing"]
 
     def test_recall_miss(self, server: Server) -> None:
         call(server, "memory_remember", {"content": "媒体投稿界面"})

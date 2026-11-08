@@ -45,7 +45,7 @@ def test_search_shows_missing_terms(db: Path, capsys: pytest.CaptureFixture[str]
 
     main(["--db", str(db), "search", "杭州测试机上装的是什么数据库"])
     out = capsys.readouterr().out
-    assert "missing" in out
+    assert "corpus has no" in out
     assert "数据库" in out
 
 

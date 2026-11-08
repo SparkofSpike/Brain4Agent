@@ -98,11 +98,35 @@ class TestMissingTerms:
         store.add("杭州那台测试机的地址是 114.215.175.63", session_id="s1")
         r = store.search("杭州测试机上装的是什么数据库")
         assert "数据库" in r.best().missing_terms
+        assert "数据库" in r.corpus_missing
 
     def test_no_missing_when_present(self, store: MemoryStore) -> None:
         store.add("杭州测试机的地址是 114.215.175.63", session_id="s1")
         r = store.search("杭州测试机的地址")
         assert "地址" not in r.best().missing_terms
+        assert "地址" not in r.corpus_missing
+
+    def test_corpus_missing_needs_total_absence(self, store: MemoryStore) -> None:
+        """The distinction that fixed 16 false refusals: one session lacking a
+        word is ordinary; the whole corpus lacking it is the signal."""
+        store.add("用户问了一个关于部署的问题", session_id="s1")
+        store.add("部署目录在 /opt/app", session_id="s2")
+
+        r = store.search("部署目录在哪里")
+        assert "部署" not in r.corpus_missing
+
+        # A word no session has at all is the signal.
+        r2 = store.search("部署用的是哪个数据库")
+        assert "数据库" in r2.corpus_missing
+
+    def test_session_missing_reported_per_session(self, store: MemoryStore) -> None:
+        """Session-level absence still explains a ranking, even when the corpus
+        knows the term from a different session."""
+        store.add("用户问了问题", session_id="s1")
+        store.add("部署在 /opt/app", session_id="s2")
+        r = store.search("用户部署", top_k=2)
+        assert not r.corpus_missing
+        assert any("用户" in e.missing_terms for e in r.evidence)
 
     def test_coverage_in_range(self, store: MemoryStore) -> None:
         store.add("媒体投稿的排期文件在 apps/api/data", session_id="s1")
@@ -114,6 +138,13 @@ class TestMissingTerms:
         terms = question_terms("杭州测试机上装的是什么数据库？")
         assert "什么" not in terms
         assert any("数据库" in t or "数据" in t for t in terms)
+
+    def test_verbs_and_adverbs_filtered(self, store: MemoryStore) -> None:
+        """The 27-false-refusal lesson: 直接/应该/哪几个 are grammar, not content."""
+        terms = question_terms("应该直接修复哪几个组件")
+        assert "应该" not in terms
+        assert "直接" not in terms
+        assert "哪几个" not in terms
 
 
 class TestTokenize:
@@ -170,7 +201,8 @@ class TestDescribe:
         r = store.search("不存在的内容")
         assert "no evidence" in describe(r)
 
-    def test_shows_missing(self, store: MemoryStore) -> None:
+    def test_shows_corpus_missing(self, store: MemoryStore) -> None:
         store.add("杭州测试机的地址", session_id="s1")
         text = describe(store.search("杭州测试机上装的是什么数据库"))
-        assert "missing" in text
+        assert "corpus has no" in text
+        assert "数据库" in text

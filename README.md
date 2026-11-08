@@ -92,10 +92,12 @@ user: 中文查询搜不到记忆，nmem recall 返回空
 assistant: 根因在 keywords.py 第 443 行，正则不含汉字范围
 
 $ brain4agent search "杭州测试机上装的是什么数据库"
-  [ 3.39 cov=0.34] 2287920753f2  missing: 数据库, 机上
+1 sessions for '杭州测试机上装的是什么数据库'
+  corpus has no: 数据库, 机上
+  [ 3.39 cov=0.34] 2287920753f2  this session lacks: 数据库, 机上
 ```
 
-`missing:` 那一行是重点。它不是「没找到」，是「语料里没有『数据库』这个词」。
+`corpus has no:` 那一行是重点。它不是「没找到」，是「整份语料里没有『数据库』这个词」。
 
 ### 给 agent 用（MCP）
 
@@ -110,7 +112,7 @@ $ brain4agent search "杭州测试机上装的是什么数据库"
 四个工具：
 
 - `memory_remember` — 存一轮对话，返回 session id
-- `memory_recall` — 检索。返回证据，包含 `missing_terms`
+- `memory_recall` — 检索。返回证据，包含 `corpus_missing` 和每个会话的 `missing_terms`
 - `memory_session` — 读整个会话
 - `memory_stats` — 计数
 
@@ -132,18 +134,22 @@ with MemoryStore("brain.db") as store:
 
     result = store.search("中文查询为什么搜不到")
     best = result.best()
-    print(best.coverage, best.missing_terms)
+    print(best.coverage, result.corpus_missing)
 ```
 
 检索返回**证据**，不返回结论：
 
 ```
 >>> store.search("杭州测试机上装的是什么数据库")
+corpus_missing=['数据库']
 evidence=[Evidence(score=2.70, coverage=0.32, missing_terms=['数据库', '机上'])]
 ```
 
-`missing_terms` 直接说明语料里没有「数据库」这个词。这算不算「没记过」，
+`corpus_missing` 说明整份语料里没有「数据库」这个词。这算不算「没记过」，
 由调用方结合上下文判断——它手里已经有模型了。
+
+会话级的 `missing_terms` 是另一回事：它只说明这条会话没有这个词，
+用来解释它为什么排在当前位置。两者混用会得到大量假拒答（D-018）。
 
 一次问答用 `add_exchange` 存成一个会话。检索以会话为单位，不是以轮为单位：
 答案常常跨轮，按单轮判断会产生大量假拒答。
@@ -239,22 +245,33 @@ jieba 精确度略高但召回更低（未登录词），对拒答无帮助。�
 所以拒答由调用方做，记忆系统只交证据：
 
 ```
-记忆系统                          调用方（agent）
-检索 → 排序                       拿到 evidence + missing_terms
-每条带 score / coverage / 缺失词    用已有的模型判断，或直接展示给用户
-零模型、零推理、几十 MB             这是它本来就该做的事
+记忆系统                              调用方（agent）
+检索 → 排序                           拿到 evidence + corpus_missing
+每条带 score / coverage / 缺失词        用已有的模型判断，或直接展示给用户
+零模型、零推理、几十 MB                 这是它本来就该做的事
 ```
 
-关键是 `missing_terms`——不是分数，是**具体的词**：
+关键不是分数，是**具体的词**，而且两个缺失信号必须分开：
 
-```
-可答：杭州测试机的地址和部署目录是什么？  cov=1.00  无缺失
-不可答：杭州测试机上装的是什么数据库？    cov=0.44  缺失 ['数据库']
-```
+- `corpus_missing` —— 整份语料都没有这个词。**强信号，事实。**
+- `missing_terms` —— 这个会话没有这个词。只是解释它为什么排在这里。
 
-**代价说清楚**：开箱即用的拒答没了。非模型方法的拒答率上限实测是 **21%**
-（BM25 分数、IDF 覆盖、未见词、词级 coverage、NQC/WIG/Clarity、
-13 特征逻辑回归全试过），而模型能到 89.5%–100%。差一个数量级。
+一开始我把两者混为一谈，用「会话缺失」当拒答信号，40 道可答题误拒 27 道
+（keep 0.325）。区别在于：`用户`、`记忆` 在多数单个会话里没有，在整个语料里有——
+那不是「我不知道」，是「这条不相关」。
+
+**代价说清楚**：开箱即用的拒答没了。零模型里最强的是 `corpus_missing`：
+
+| 方案 | keep | refuse |
+|---|---|---|
+| 总是回答 | 1.000 | 0.000 |
+| **corpus_missing** | **0.875** | **0.632** |
+| 本地 9b | 0.950 | 0.895 |
+| 云端 deepseek-flash | 0.925 | 1.000 |
+
+keep 0.875 意味着 12.5% 的可答题会被误拒，作为**自动拒答**不够好。
+但作为**证据**它比分数有用得多：它给出的是「语料里没有『数据库』这个词」，
+一句可以直接展示、可以直接推理的话，而不是「置信度 0.31」。
 
 ### 5. 云端 API 能补上，但慢
 

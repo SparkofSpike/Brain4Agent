@@ -64,11 +64,12 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "memory_recall",
         "description": (
-            "Search long-term memory. Returns ranked sessions with a coverage score "
-            "and — more useful — `missing_terms`: words in the question that the "
-            "corpus never contains. A non-empty missing_terms is the strongest "
-            "cheap signal that the memory cannot answer, but deciding that is the "
-            "caller's job, not this server's."
+            "Search long-term memory. Returns ranked sessions with coverage, plus two "
+            "different absence signals. `corpus_missing` lists words the question "
+            "treats as central that appear nowhere in the whole stored corpus -- the "
+            "strong signal, and the closest thing to a free answer to 'do I know "
+            "this'. `missing_terms` on each session is just why that session ranked "
+            "where it did. Whether to abstain is the caller's call."
         ),
         "inputSchema": {
             "type": "object",
@@ -196,6 +197,7 @@ class Server:
             "found": True,
             "query": query,
             "sessions_searched": result.sessions_searched,
+            "corpus_missing": result.corpus_missing,
             "evidence": [
                 {
                     "session_id": e.session_id,

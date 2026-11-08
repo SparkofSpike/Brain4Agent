@@ -23,7 +23,7 @@ import math
 from dataclasses import dataclass, field
 from typing import Protocol
 
-from brain4agent.tokenize import word_tokens
+from brain4agent.tokenize import load_jieba, word_tokens
 
 # Question terms that are structural rather than about the answer. Reporting
 # "什么" as missing would be true of every question and useless.
@@ -47,6 +47,28 @@ _INTERROGATIVE = frozenset(
 
 _FILLER = frozenset("的了是在和与就都而及或吧呢吗啊呀哦嗯我你他她它这那一个们")
 
+# Part-of-speech tags worth reporting as missing.
+#
+# Without this filter the top-1 keep rate was 0.325 -- 27 false refusals out of
+# 40 answerable questions -- because "直接", "应该", "不是", "哪几个" and "最终"
+# are in plenty of *questions* and in no *corpus*. They are the grammar of
+# asking, not the content of an answer. Only nominals and things that look like
+# names can plausibly be the thing a question is missing.
+_CONTENT_POS = frozenset(
+    {
+        "n",  # 名词
+        "nr",  # 人名
+        "ns",  # 地名
+        "nt",  # 机构团体
+        "nz",  # 其他专名
+        "ng",
+        "nl",
+        "eng",  # 英文
+        "vn",  # 动词性名词：测试、查询
+        "an",  # 形容词性名词
+    }
+)
+
 
 class _MemoryLike(Protocol):
     id: str
@@ -59,9 +81,10 @@ class Evidence:
     """One retrieved session, with the checks a caller can act on.
 
     ``coverage`` is the share of the question's IDF-weighted terms present in
-    this session. ``missing_terms`` is the more useful half: the specific words
-    absent, so a caller can say "no memory mentions 数据库" rather than
-    "confidence 0.31".
+    this session. ``missing_terms`` is what *this session* does not contain --
+    which explains why it is ranked where it is, but is not by itself evidence
+    that the memory is absent. A session missing 用户 is normal; the corpus
+    knowing 用户 somewhere else means the concept is not unknown.
     """
 
     memory: _MemoryLike
@@ -78,14 +101,20 @@ class Evidence:
 class SearchResult:
     """What the memory system hands back.
 
-    ``corpus_terms`` lets a caller distinguish "not in this session" from "not
-    in the brain at all", which are different answers to a user.
+    ``corpus_missing`` is the strong signal: terms the question treats as
+    central that appear nowhere in the entire stored corpus. A session
+    missing them is irrelevant; the brain missing them is an answer.
+
+    Keeping this separate from ``Evidence.missing_terms`` matters. Conflating
+    the two produced 16 false refusals out of 40, because 用户 and 记忆 are
+    absent from most individual sessions and present in the corpus.
     """
 
     query: str
     evidence: list[Evidence]
     corpus_terms: int
     sessions_searched: int
+    corpus_missing: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -124,6 +153,40 @@ class JudgedResult:
         return self.verdict
 
 
+def _is_entity_like(term: str) -> bool:
+    """Fallback heuristic when jieba is absent.
+
+    No dictionary means no POS tags, so length and filler content are all there
+    is to go on. Noisier than the jieba path, and documented as such rather than
+    quietly degraded.
+    """
+    return len(term) > 1 and term not in _INTERROGATIVE and not all(ch in _FILLER for ch in term)
+
+
+def _content_words(text: str) -> list[str]:
+    """Nominals and names from the question, in order.
+
+    Uses jieba's POS tagger when available. A long digit-bearing token is kept
+    even though it tags as ``m``: an IP address or a version number is exactly
+    the kind of thing whose absence is worth reporting.
+    """
+    jieba = load_jieba()
+    if jieba is None:
+        return [t for t in word_tokens(text) if _is_entity_like(t)]
+
+    import jieba.posseg as pseg
+
+    out: list[str] = []
+    for word, flag in pseg.cut(text):
+        w = word.strip().lower()
+        if not w or w.isspace():
+            continue
+        long_number = flag == "m" and len(w) >= 3 and any(ch.isdigit() for ch in w)
+        if flag in _CONTENT_POS or long_number:
+            out.append(w)
+    return out
+
+
 def question_terms(query: str) -> list[str]:
     """Content terms of the question, longest first.
 
@@ -131,11 +194,7 @@ def question_terms(query: str) -> list[str]:
     absence: for 数据库 what matters is that no session contains it, not that
     数据 appears somewhere.
     """
-    terms = [
-        t
-        for t in word_tokens(query)
-        if len(t) > 1 and t not in _INTERROGATIVE and not all(ch in _FILLER for ch in t)
-    ]
+    terms = [t for t in _content_words(query) if t not in _INTERROGATIVE and t not in _FILLER]
     seen: set[str] = set()
     unique = [t for t in terms if not (t in seen or seen.add(t))]
     return sorted(unique, key=len, reverse=True)
@@ -171,6 +230,12 @@ def build_evidence(
 
     n_sessions = len(by_session) or 1
     texts = list(session_text.values())
+
+    # A term the whole corpus lacks. Checked once against the joined corpus, not
+    # per session: 用户 missing from one session says nothing, 用户 missing from
+    # every session says everything.
+    joined = "\n".join(texts)
+    corpus_missing = [t for t in q_terms if t not in joined]
 
     def idf(term: str) -> float:
         d = sum(1 for t in texts if term in t)
@@ -209,6 +274,7 @@ def build_evidence(
         evidence=evidence,
         corpus_terms=corpus_terms,
         sessions_searched=sessions_searched,
+        corpus_missing=corpus_missing,
     )
 
 
@@ -217,7 +283,9 @@ def describe(result: SearchResult) -> str:
     if result.empty:
         return f"no evidence for {result.query!r}"
     lines = [f"{len(result.evidence)} sessions for {result.query!r}"]
+    if result.corpus_missing:
+        lines.append(f"  corpus has no: {', '.join(result.corpus_missing)}")
     for e in result.evidence:
-        missing = f"  missing: {', '.join(e.missing_terms)}" if e.missing_terms else ""
+        missing = f"  session lacks: {', '.join(e.missing_terms)}" if e.missing_terms else ""
         lines.append(f"  [{e.score:5.2f} cov={e.coverage:.2f}] {e.session_id}{missing}")
     return "\n".join(lines)
