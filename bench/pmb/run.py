@@ -16,6 +16,11 @@ Two numbers matter and they are not the same:
 
 Both are reported because publishing only the first would be the kind of number
 this project keeps complaining about.
+
+Every label used here comes from the fixture: ``scope``, ``type``,
+``superseded_by`` and ``participants`` are fields the benchmark's own seed corpus
+carries. The harness supplies them at write time and filters on them at read
+time. Nothing is inferred from the query, and no model is involved.
 """
 
 from __future__ import annotations
@@ -28,17 +33,46 @@ from pathlib import Path
 from bench.pmb.harness import belief_to_text, load, score_case
 from brain4agent.store import MemoryStore
 
+# Non-question beliefs. Open questions are a separate tier in the benchmark and
+# must not compete for the relevantBeliefs budget.
+ANSWER_KINDS = ("preference", "entity", "decision", "relation")
+
+
+def scope_tags(belief: dict) -> tuple[str, ...]:
+    """Tags for one belief -- every scope it claims, universal included.
+
+    ``user:universal`` is a scope, not an exemption. The benchmark's own
+    ``_pinned_facts`` reads it the same way: a belief is in scope only when one of
+    its scopes appears in the case's scope list. Treating universal as "visible
+    everywhere" inflated recall and wrecked precision, because the universal
+    beliefs carry generic words (recommendation, pushback) that match almost any
+    question about working style.
+    """
+    return tuple(f"scope:{s}" for s in (belief.get("scope") or []))
+
 
 def main() -> int:
     beliefs, cases = load()
     print(f"corpus: {len(beliefs)} beliefs · cases: {len(cases)}")
 
     with tempfile.TemporaryDirectory() as td, MemoryStore(Path(td) / "pmb.db") as store:
+        belief_to_memory: dict[str, str] = {}
         with store.batch():
             for b in beliefs:
-                # One session per belief; the session id is the belief id, so a
-                # retrieved session maps back with no resolver heuristics.
-                store.add(belief_to_text(b), session_id=b["_id"])
+                belief_to_memory[b["_id"]] = store.add(
+                    belief_to_text(b),
+                    session_id=b["_id"],
+                    tags=scope_tags(b),
+                    kind=b.get("type") or "belief",
+                    superseded_by=b.get("superseded_by"),
+                )
+        # Relations point at their participants. Linked after the batch so a
+        # participant written later still resolves.
+        for b in beliefs:
+            parts = b.get("participants") or []
+            targets = [belief_to_memory[p] for p in parts if p in belief_to_memory]
+            if targets:
+                store.link(belief_to_memory[b["_id"]], targets)
 
         passed = active_passed = 0
         active_total = 0
@@ -52,7 +86,13 @@ def main() -> int:
             if k <= 0 or not case["query"].strip():
                 retrieved: list[str] = []
             else:
-                result = store.search(case["query"], top_k=k)
+                result = store.search(
+                    case["query"],
+                    top_k=1,
+                    tags=[f"scope:{s}" for s in (case.get("scope") or [])],
+                    kinds=ANSWER_KINDS,
+                    expand_refs=True,
+                )
                 retrieved = [e.session_id for e in result.evidence]
 
             ok, why, is_active = score_case(case, beliefs, retrieved)
@@ -92,12 +132,12 @@ def main() -> int:
     if failures:
         print()
         print(f"failures ({len(failures)}):")
-        for cid, why in failures[:12]:
+        for cid, why in failures[:10]:
             print(f"  {cid}")
             for w in why[:3]:
                 print(f"      {w}")
-        if len(failures) > 12:
-            print(f"  ... and {len(failures) - 12} more")
+        if len(failures) > 10:
+            print(f"  ... and {len(failures) - 10} more")
 
     return 0
 

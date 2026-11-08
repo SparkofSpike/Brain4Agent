@@ -43,11 +43,12 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "b4a_remember",
         "description": (
-            "Store one turn in long-term memory. By default the turn is distilled "
-            "into durable memories (facts, decisions, errors, preferences) and "
-            "chit-chat is dropped; set distil=false to store the raw text instead. "
-            "Distilling costs one model call per turn and takes a second or two. "
-            "Pass session_id to append to an existing conversation."
+            "Store one turn in long-term memory. The turn is stored verbatim by "
+            "default; pass distil=true to run a model call that keeps only durable "
+            "memories (facts, decisions, errors, preferences). Distilling costs a "
+            "model call per turn and measurably hurts retrieval -- store raw and let "
+            "b4a_ask extract at read time. Pass session_id to append to an existing "
+            "conversation."
         ),
         "inputSchema": {
             "type": "object",
@@ -64,8 +65,22 @@ TOOLS: list[dict[str, Any]] = [
                 },
                 "distil": {
                     "type": "boolean",
-                    "default": True,
-                    "description": "Distil into durable memories instead of storing verbatim.",
+                    "default": False,
+                    "description": (
+                        "Run a model call to extract durable memories instead of "
+                        "storing the turn verbatim. Off by default: measured worse "
+                        "for retrieval, and it needs a model."
+                    ),
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Optional labels, no spaces, e.g. ['scope:code']. Retrieval "
+                        "can filter on them. Use them for what the text does not say: "
+                        "which project, which domain. An untagged memory matches any "
+                        "tag filter."
+                    ),
                 },
             },
             "required": ["content"],
@@ -86,6 +101,15 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "query": {"type": "string"},
                 "top_k": {"type": "integer", "default": 3, "minimum": 1, "maximum": 20},
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": (
+                        "Only return memories carrying at least one of these tags. "
+                        "Omit to search everything. Untagged memories are never "
+                        "excluded by this filter."
+                    ),
+                },
             },
             "required": ["query"],
         },
@@ -205,19 +229,24 @@ class Server:
         if role not in {"user", "assistant", "system"}:
             raise _ToolError(f"role must be user, assistant or system, got {role!r}")
 
-        # distil=True runs a model call and keeps only durable memories. It is
-        # the default because storing every turn is what fills a memory with
-        # near-duplicates; set distil=false to store the raw text verbatim.
-        distil = args.get("distil", True)
+        # distil defaults to False, and that is a reversal. It used to default to
+        # True on the theory that storing every turn floods memory with
+        # near-duplicates. Measured (D-023): distilling at write time drops
+        # retrieval hit@1 from 0.9250 to 0.7750, because the extractor cannot know
+        # what the memory will later be asked. arXiv:2602.16192 names the failure
+        # and recommends storing the raw experience, extracting on demand -- which
+        # is what b4a_ask does.
+        distil = args.get("distil", False)
         if not isinstance(distil, bool):
             raise _ToolError("'distil' must be a boolean")
 
+        tags = _arg_str_list(args, "tags")
         try:
             if distil:
                 ids = self.store.remember(content, session_id=sid, role=role)
             else:
-                ids = [self.store.add(content, session_id=sid, role=role)]
-        except ValueError as exc:  # empty, too long
+                ids = [self.store.add(content, session_id=sid, role=role, tags=tags)]
+        except ValueError as exc:  # empty, too long, tag with a space
             raise _ToolError(str(exc)) from exc
 
         if not ids:
@@ -229,8 +258,9 @@ class Server:
         if not query:
             raise _ToolError("query must not be empty")
         top_k = max(1, min(_arg_int(args, "top_k", 3), 20))
+        tags = _arg_str_list(args, "tags")
 
-        result = self.store.search(query, top_k=top_k)
+        result = self.store.search(query, top_k=top_k, tags=tags or None)
         if result.empty:
             return _text(
                 json.dumps(
@@ -310,6 +340,27 @@ def _arg_int(args: dict[str, Any], key: str, default: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int):
         raise _ToolError(f"'{key}' must be an integer, got {type(value).__name__}")
     return value
+
+
+def _arg_str_list(args: dict[str, Any], key: str) -> tuple[str, ...]:
+    """Optional list-of-strings argument.
+
+    A bare string is rejected rather than wrapped: ``tags: "scope:code"`` almost
+    certainly meant a list, and silently accepting it would make a typo look like
+    a working filter for exactly one tag.
+    """
+    value = args.get(key)
+    if value is None:
+        return ()
+    if not isinstance(value, list):
+        raise _ToolError(f"'{key}' must be an array of strings")
+    out: list[str] = []
+    for item in value:
+        if not isinstance(item, str):
+            raise _ToolError(f"'{key}' must contain only strings")
+        if item.strip():
+            out.append(item.strip())
+    return tuple(out)
 
 
 class _ToolError(Exception):

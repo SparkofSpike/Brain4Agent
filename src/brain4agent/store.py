@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
-from collections.abc import Callable, Iterator
+from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -71,7 +71,10 @@ CREATE TABLE IF NOT EXISTS memories (
     kind        TEXT NOT NULL DEFAULT 'raw',
     importance  REAL NOT NULL DEFAULT 0.5,
     entities    TEXT NOT NULL DEFAULT '',
-    source_text TEXT
+    source_text TEXT,
+    tags        TEXT NOT NULL DEFAULT '',
+    superseded_by TEXT,
+    refs        TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
@@ -96,6 +99,19 @@ class Memory:
     importance: float = 0.5
     entities: tuple[str, ...] = ()
     source_text: str | None = None
+    # Labels the caller attaches at write time: which scope a memory belongs to,
+    # what kind of thing it is. Retrieval can filter on them without reading a
+    # single word, which is how a bag of text learns to stay out of the results.
+    tags: tuple[str, ...] = ()
+    # Set when a later memory replaces this one. A superseded memory must not
+    # surface: it is not wrong, it is out of date, and returning it silently is
+    # how a memory system makes an agent confidently misinformed.
+    superseded_by: str | None = None
+    # Other memories this one points at. A relation memory is useless without its
+    # participants: asking about a dependency returns the relation, and the thing
+    # depended on is exactly what the asker needs next. Expansion is opt-in at
+    # search time because it trades precision for completeness.
+    refs: tuple[str, ...] = ()
 
 
 def _now() -> str:
@@ -171,6 +187,11 @@ class MemoryStore:
             ("importance", "ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5"),
             ("entities", "ALTER TABLE memories ADD COLUMN entities TEXT NOT NULL DEFAULT ''"),
             ("source_text", "ALTER TABLE memories ADD COLUMN source_text TEXT"),
+            # Tags and supersession: a memory that predates them is unlabelled and
+            # current, which is what an empty string and a NULL mean here.
+            ("tags", "ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT ''"),
+            ("superseded_by", "ALTER TABLE memories ADD COLUMN superseded_by TEXT"),
+            ("refs", "ALTER TABLE memories ADD COLUMN refs TEXT NOT NULL DEFAULT ''"),
         ):
             if column not in cols:
                 db.execute(ddl)
@@ -191,15 +212,31 @@ class MemoryStore:
         # the caller meant.
         rows = self._db.execute(
             "SELECT id, session_id, role, content, created_at, tokens,"
-            " kind, importance, entities, source_text FROM memories ORDER BY rowid"
+            " kind, importance, entities, source_text, tags, superseded_by, refs"
+            " FROM memories ORDER BY rowid"
         ).fetchall()
         self._by_session = {}
         self._session_text = {}
         self._id_to_session = {}
+        self._by_id = {}
         index_fn, query_fn = _cached_tokenizers()
         prepared: list[tuple[str, list[str]]] = []
 
-        for mid, sid, role, content, created, tokens, kind, importance, entities, source in rows:
+        for (
+            mid,
+            sid,
+            role,
+            content,
+            created,
+            tokens,
+            kind,
+            importance,
+            entities,
+            source,
+            tags,
+            superseded,
+            refs,
+        ) in rows:
             mem = Memory(
                 id=mid,
                 session_id=sid,
@@ -210,9 +247,13 @@ class MemoryStore:
                 importance=importance,
                 entities=tuple(entities.split()) if entities else (),
                 source_text=source,
+                tags=tuple(tags.split()) if tags else (),
+                superseded_by=superseded,
+                refs=tuple(refs.split()) if refs else (),
             )
             self._by_session.setdefault(sid, []).append(mem)
             self._id_to_session[mid] = sid
+            self._by_id[mid] = mem
             # Rows written before the tokens column existed get segmented once
             # here, then persisted on the next write of that row.
             prepared.append((mid, tokens.split() if tokens else index_fn(content)))
@@ -265,12 +306,23 @@ class MemoryStore:
         entities: tuple[str, ...] | list[str] = (),
         source_text: str | None = None,
         index_source: bool = False,
+        tags: tuple[str, ...] | list[str] = (),
+        superseded_by: str | None = None,
+        refs: tuple[str, ...] | list[str] = (),
     ) -> str:
         """Store one turn. Returns its id.
 
         A turn with no content is rejected rather than stored: an empty string
         would enter the index, match nothing, and inflate the apparent number of
         memories without ever being retrievable.
+
+        ``tags`` are labels the caller supplies -- scope, domain, whatever the
+        caller knows and the text does not say. Retrieval can filter on them, and
+        that filter is the only way a text index learns to withhold something that
+        is textually similar but contextually wrong. Tags must not contain spaces.
+
+        ``superseded_by`` links this memory to the one that replaces it. Prefer
+        ``supersede()``, which keeps both ends consistent.
         """
         text = content.strip()
         if not text:
@@ -290,12 +342,16 @@ class MemoryStore:
         # the words the question used; indexing both gives the query two ways in.
         indexed = f"{text} {source_text}" if index_source and source_text else text
         tokens = " ".join(index_fn(indexed))
+        tag_text = " ".join(t.strip() for t in tags if t.strip())
+        for t in tags:
+            if " " in t.strip():
+                raise ValueError(f"tag must not contain spaces: {t!r}")
 
         sql = (
             "INSERT INTO memories"
             " (id, session_id, role, content, created_at, tokens,"
-            " kind, importance, entities, source_text)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " kind, importance, entities, source_text, tags, superseded_by, refs)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             mid,
@@ -308,6 +364,9 @@ class MemoryStore:
             max(0.0, min(1.0, importance)),
             " ".join(entities),
             source_text,
+            tag_text,
+            superseded_by,
+            " ".join(refs),
         )
         if self._defer_commit:
             # Inside batch(): defer the fsync. A thousand individual commits is
@@ -327,9 +386,13 @@ class MemoryStore:
             importance=max(0.0, min(1.0, importance)),
             entities=tuple(entities),
             source_text=source_text,
+            tags=tuple(t.strip() for t in tags if t.strip()),
+            superseded_by=superseded_by,
+            refs=tuple(refs),
         )
         self._by_session.setdefault(sid, []).append(mem)
         self._id_to_session[mid] = sid
+        self._by_id[mid] = mem
         prev = self._session_text.get(sid)
         self._session_text[sid] = text.lower() if prev is None else f"{prev}\n{text.lower()}"
         # Deferred: the next read rebuilds once, so a bulk import does not rebuild
@@ -357,6 +420,7 @@ class MemoryStore:
         session_id: str | None = None,
         extractor: Extractor | None = None,
         index_source: bool = False,
+        tags: tuple[str, ...] | list[str] = (),
     ) -> list[str]:
         """Distil a question and its answer together.
 
@@ -401,6 +465,7 @@ class MemoryStore:
                     entities=memory.entities,
                     source_text=f"Q: {question}\nA: {answer}",
                     index_source=index_source,
+                    tags=tags,
                 )
             )
         return out
@@ -412,6 +477,7 @@ class MemoryStore:
         session_id: str | None = None,
         role: str = "user",
         extractor: Extractor | None = None,
+        tags: tuple[str, ...] | list[str] = (),
     ) -> list[str]:
         """Store a turn by distilling it into durable memories.
 
@@ -432,11 +498,11 @@ class MemoryStore:
 
         ext = extractor if extractor is not None else self._resolve_extractor()
         if ext is None:
-            return [self.add(text, session_id=session_id, role=role)]
+            return [self.add(text, session_id=session_id, role=role, tags=tags)]
 
         result = ext.extract(text)
         if not result.ok:
-            return [self.add(text, session_id=session_id, role=role)]
+            return [self.add(text, session_id=session_id, role=role, tags=tags)]
         if not result.memories:
             return []
 
@@ -452,6 +518,7 @@ class MemoryStore:
                     importance=memory.importance,
                     entities=memory.entities,
                     source_text=text,
+                    tags=tags,
                 )
             )
         return ids
@@ -553,16 +620,67 @@ class MemoryStore:
             "index_terms": len(self._index._df),
         }
 
-    def search(self, query: str, *, top_k: int = 5) -> SearchResult:
+    def search(
+        self,
+        query: str,
+        *,
+        top_k: int = 5,
+        tags: Sequence[str] | None = None,
+        kinds: Sequence[str] | None = None,
+        include_superseded: bool = False,
+        expand_refs: bool = False,
+    ) -> SearchResult:
         """Retrieve sessions and report the checks that need no model.
 
         Returns evidence, not a verdict. Whether a session actually answers the
         question is the caller's call -- see docs/decisions.md D-011.
+
+        The three filters exist because text similarity alone cannot tell a memory
+        that *should* be withheld from one that *should* be returned. ``tags`` keeps
+        only memories carrying at least one of the given labels -- scope is caller
+        knowledge, not something the words contain. ``kinds`` restricts to given
+        kinds. Superseded memories are excluded unless ``include_superseded``.
+
+        ``expand_refs`` appends the memories a hit points at. Off by default: it
+        trades precision for completeness, and the caller is the only one who
+        knows which they need right now.
         """
         if top_k < 1:
             raise ValueError(f"top_k must be at least 1, got {top_k}")
         self._ensure_fresh()
-        hits = self._index.search(query, top_k=top_k * 3)
+
+        filtering = tags is not None or kinds is not None or not include_superseded or expand_refs
+        if filtering:
+            # Filtering after a fixed top_k*3 window silently empties the result
+            # whenever the filter rejects most of the window. Ranking the whole
+            # matching set costs little at this corpus size and keeps the filter
+            # truthful.
+            raw = self._index.search(query, top_k=len(self._index))
+            hits = [
+                (mid, score)
+                for mid, score in raw
+                if self._visible(mid, tags, kinds, include_superseded)
+            ]
+        else:
+            hits = self._index.search(query, top_k=top_k * 3)
+
+        if expand_refs and hits:
+            # Truncate to the requested number *first*, then expand: a relation's
+            # participants are appended to the result, they do not compete with it
+            # for one of the top_k slots. Expanding before truncating would let a
+            # high-scoring relation push out everything else and then keep its
+            # refs anyway.
+            hits = self._with_refs(hits[:top_k], tags, kinds, include_superseded)
+            return build_evidence(
+                query=query,
+                hits=hits,
+                by_session=self._by_session,
+                session_text=self._session_text,
+                id_to_session=self._id_to_session,
+                sessions_searched=self.sessions,
+                top_k=len(hits),
+            )
+
         return build_evidence(
             query=query,
             hits=hits,
@@ -572,6 +690,103 @@ class MemoryStore:
             sessions_searched=self.sessions,
             top_k=top_k,
         )
+
+    def _with_refs(
+        self,
+        hits: list[tuple[str, float]],
+        tags: Sequence[str] | None,
+        kinds: Sequence[str] | None,
+        include_superseded: bool,
+    ) -> list[tuple[str, float]]:
+        """Append referenced memories after the hits that point at them.
+
+        The ref inherits the score of the memory that named it. It came in through
+        that memory, not through its own match, and inventing a score for it would
+        make it look independently retrieved.
+        """
+        seen = {mid for mid, _ in hits}
+        out = list(hits)
+        for mid, score in hits:
+            mem = self._by_id.get(mid)
+            if mem is None:
+                continue
+            for ref in mem.refs:
+                if ref in seen:
+                    continue
+                if not self._visible(ref, tags, kinds, include_superseded):
+                    continue
+                seen.add(ref)
+                out.append((ref, score))
+        return out
+
+    def link(self, from_id: str, to_ids: Sequence[str]) -> int:
+        """Point one memory at others. Returns how many links were accepted.
+
+        Used for relations: a memory saying "auth depends on Redis" is far more
+        useful if asking about it also surfaces the Redis memory. Unknown target
+        ids are skipped rather than raising, because links are often built while
+        the target is still being written and a missing one is not a bug -- but
+        the count tells the caller what actually landed.
+        """
+        self._ensure_fresh()
+        if from_id not in self._by_id:
+            return 0
+        current = list(self._by_id[from_id].refs)
+        fresh = [t for t in to_ids if t != from_id and t in self._by_id and t not in current]
+        if not fresh:
+            return 0
+
+        with self._db:
+            self._db.execute(
+                "UPDATE memories SET refs = ? WHERE id = ?",
+                (" ".join(current + fresh), from_id),
+            )
+        self._dirty = True
+        return len(fresh)
+
+    def _visible(
+        self,
+        memory_id: str,
+        tags: Sequence[str] | None,
+        kinds: Sequence[str] | None,
+        include_superseded: bool,
+    ) -> bool:
+        mem = self._by_id.get(memory_id)
+        if mem is None:
+            return True
+        if not include_superseded and mem.superseded_by:
+            return False
+        if kinds is not None and mem.kind not in kinds:
+            return False
+        # An untagged memory has no scope, so no scope can exclude it. Only a
+        # memory that *claims* a scope can be filtered out by one -- otherwise the
+        # universal beliefs become invisible to every query that is not itself
+        # universal, which is the opposite of universal.
+        out_of_scope = tags is not None and mem.tags and not (set(tags) & set(mem.tags))
+        return not out_of_scope
+
+    def memory(self, memory_id: str) -> Memory | None:
+        """One memory by id, or None. Triggers a reload if the store changed."""
+        self._ensure_fresh()
+        return self._by_id.get(memory_id)
+
+    def supersede(self, old_id: str, new_id: str) -> bool:
+        """Mark ``old_id`` as replaced by ``new_id``.
+
+        Returns False when either id is unknown, rather than raising: a caller
+        tidying up after a crash should not have to distinguish "already gone"
+        from "never existed". The pair is checked so a typo cannot orphan a
+        memory by pointing at nothing.
+        """
+        self._ensure_fresh()
+        if old_id not in self._by_id or new_id not in self._by_id:
+            return False
+        if old_id == new_id:
+            raise ValueError("a memory cannot supersede itself")
+        with self._db:
+            self._db.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (new_id, old_id))
+        self._dirty = True
+        return True
 
     def search_judged(
         self,

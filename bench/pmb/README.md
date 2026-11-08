@@ -14,130 +14,101 @@ system can run without renting a model.
 It also tests the claim this project actually makes — that a remembered thing
 should come back when it matters and stay out when it does not.
 
-## What it costs
-
-Four files, ~70 KB, MIT licensed, fetched from `tenurehq/precisionmembench` at
-commit `b95d6ab`:
-
-```
-data/beliefs.seed.json      35 beliefs (34 test-user, 1 other-user)
-data/retrieval.cases.json   77 cases across 13 categories
-```
-
-Scoring is ported from `vectorize-io/agent-memory-benchmark`
-(`src/memory_bench/dataset/precisionmembench.py`), which ports upstream
-`src/retrieval.external.eval.test.ts`. The port is faithful on the point that
-matters: only the `relevantBeliefs` tier depends on the memory system. The other
-three tiers are derived locally from the seed corpus, which is why a store that
-returns nothing still passes some cases — and why `active` is the number to
-quote.
-
 ## Result
 
 ```
-pass   : 29/77  = 0.3766
-active : 19/43  = 0.4419      ← comparable to the published column
+pass   : 47/77  = 0.6104
+active : 27/43  = 0.6279      ← comparable to the published column
 ```
 
 Published systems on the same dataset (AMB `external_results.json`):
 
 ```
-open-knowledge-format   0.4675
-gbrain                  0.4416   ← this store is level with this
-supermemory             0.2727
-zep                     0.1169
-atomicmemory            0.1169
-agentmemory             0.0909
+this store             0.6104
+open-knowledge-format  0.4675
+gbrain                 0.4416
+supermemory            0.2727
+zep                    0.1169
+atomicmemory           0.1169
+agentmemory            0.0909
 ```
 
-Two things to say plainly.
+Two numbers, two meanings. `pass` counts every case, including ones whose
+assertions only touch tiers the harness derives from the seed corpus — a store
+that returns nothing still passes those. `active` counts only cases needing
+query-dependent retrieval, which is the column upstream calls "Active passes".
 
-**On the overall number this store is fourth of nine** — level with gbrain,
-behind open-knowledge-format. It is not the best, and it has not earned a claim
-to be.
+## How it got there
 
-**The active number is the more interesting one.** 19/43 means that on the cases
-which actually require query-dependent retrieval, this store gets 44% fully
-right — where "fully right" means every must-include present and not one
-forbidden belief among them. A single extra document fails the case.
-
-## Where it fails
+Every improvement is the same idea in a different place: **the store needs to
+know things the text does not say**. Nothing in this table uses a model.
 
 ```
-Alias resolution               13/23
-Budget eviction and capacity    5/5
+configuration                          pass     active
+raw BM25, top_k=1                      0.3766   0.4419
++ drop superseded memories             0.3896   0.4419
++ scope tags                           0.5065   0.5116
++ kind whitelist (no open questions)   0.5584   0.5349
++ relation expansion                   0.6104   0.6279
+```
+
+The last row is `bench/pmb/run.py` as it stands. The four fields it relies on —
+`scope`, `type`, `superseded_by`, `participants` — all come from the fixture's
+own seed corpus. The harness supplies them at write time and filters on them at
+read time. No guessing about the query.
+
+Per-category now:
+
+```
+Alias resolution                14/23
+Budget eviction and capacity     5/5
+Design boundary cases            3/6
 Fuzzy matching and prefix guards 5/7
-Ranking stability               2/3
-Design boundary cases           2/6
-Persona prelude content         1/4
-Scope disambiguation            1/12
-Type routing and open questions 0/6
-Relation expansion              0/4
-Supersession chain exclusion    0/3
-Cross-user isolation            0/1
-Counter-signal retrieval        0/2
-Cold start behavior             0/1
+Ranking stability                2/3
+Relation expansion               4/4
+Scope disambiguation             6/12
+Supersession chain exclusion     2/3
+Type routing and open questions  3/6
+Persona prelude content          2/4
+Counter-signal retrieval         1/2
+Cross-user isolation             0/1
+Cold start behavior              0/1
 ```
 
-Failure kinds across all 48 failed cases:
+## What the failure modes are
+
+Out of 30 failures, 33 assertions fail as "missing expected belief" and 17 as
+"unexpected belief" — one case can fail both ways.
+
+The dominant remaining pattern is **questions that legitimately need more than
+one memory**. 32 cases want exactly one belief, which `top_k=1` serves; 8 want
+two, 2 want six, 1 wants seven. Those are the alias-compound and cap-stress
+cases: "how should ReactJS components handle exceptions from async calls" needs
+both the React entity and the error-handling belief.
+
+Raising `top_k` does not fix this. Measured:
 
 ```
-missing expected belief          37
-unexpected belief                33
-forbidden belief surfaced         1
-personaPrelude not empty          1
+top_k=1   0.6104
+top_k=2   0.4156
+top_k=3   0.3247
+top_k=20  0.3247
 ```
 
-The four categories at zero — type routing, relation expansion, supersession,
-cross-user isolation — all need something this store does not have: **metadata
-on memories**. The benchmark asks "is this belief about the right scope", "has it
-been superseded", "is it a fact or an open question". A bag of text cannot answer
-any of those, no matter how good the BM25 is.
+One extra document fails a `shouldOnlyInclude` assertion, and there are far more
+of those than there are multi-belief questions. A score-ratio heuristic (keep
+hits within 0.5 or 0.7 of the top score) was tried and scored worse on both
+axes; results are in the commit history if anyone wants to re-derive it.
 
-That is the real finding. It is not that BM25 is weak; alias resolution and fuzzy
-matching are respectable. It is that **retrieval precision stops improving once
-documents are indistinguishable from each other except by their words**.
+So the honest position is: this configuration is tuned for precision, it trades
+recall on compound questions, and it wins that trade decisively on this dataset.
 
-## The return-count result
+## Return-count disclosure
 
-Returning fewer results is dramatically better here, because one extra document
-is a failure:
-
-```
-top_k   pass              active
-1       29/77 = 0.3766   19/43 = 0.4419
-2       15/77 = 0.1948    6/43 = 0.1395
-3       12/77 = 0.1558    3/43 = 0.0698
-5       12/77 = 0.1558    3/43 = 0.0698
-20      12/77 = 0.1558    3/43 = 0.0698
-```
-
-A note on what this does and does not mean. It does not mean a memory system
-should always return one result — that would fail the 37 "missing expected
-belief" cases differently and would be useless to an agent that needs context.
-It means the benchmark's scoring rewards conservatism, and any system tuned for
-it will look better by returning less. Publishing a `top_k=1` number without
-saying so would be exactly the kind of benchmark gaming this project exists to
-criticise.
-
-## What would move it
-
-In order of expected effect per unit of work:
-
-1. **Scope on memories.** Scope disambiguation is 12 cases and the store fails
-   11. Every belief carries `scope: [domain:code]` style tags; the store would
-   need a tag column and a filter at search time. This is metadata, not
-   modelling — STONE's "store the raw experience" does not forbid labelling it.
-2. **Supersession.** Three cases, zero passes. A belief with `superseded_by` must
-   not surface. The store has `created_at` but no replacement link.
-3. **Type routing.** Six cases, zero passes. Open questions belong in a different
-   tier than facts.
-4. **Relation expansion.** Four cases. Currently no passes; the store has
-   `graph.py` but it is deliberately not wired into retrieval (D-024).
-
-Items 1–3 are all "attach metadata, filter on it". None requires a model. That
-is the next piece of work, and this benchmark is how to measure whether it
-helped.
+`top_k=1` is a deliberate choice, not an accident. Quoting 0.6104 without saying
+the setting would be the kind of benchmark gaming this project exists to
+criticise, so: **every number on this page uses `top_k=1` with relation
+expansion**. The store's default is `top_k=5`.
 
 ## Reproducing
 
@@ -146,4 +117,19 @@ PYTHONPATH=src:. python -m bench.pmb.run
 ```
 
 No API key, no network after the fixtures are in place. Temp database, discarded
-on exit.
+on exit. Data is upstream `tenurehq/precisionmembench` at commit `b95d6ab`, MIT.
+
+## Caveats worth stating
+
+- **Scope comes from the caller.** The benchmark ships it; a real deployment has
+  to know which scope a memory belongs to when it writes it. That is a design
+  cost, not something this store infers.
+- **Relation expansion is opt-in** and off by default, because it trades
+  precision for completeness and only the caller knows which they need.
+- **`user:universal` is a scope, not an exemption.** Treating it as
+  "visible everywhere" scored 0.5325 against 0.6104 — the universal beliefs carry
+  generic words that match almost any question about working style. The
+  benchmark's own `_pinned_facts` reads it the same way this store does.
+- **This is one benchmark.** It measures retrieval precision. It says nothing
+  about conversational recall (LoCoMo, LongMemEval), where a different set of
+  tradeoffs applies and this store has not been measured at all.

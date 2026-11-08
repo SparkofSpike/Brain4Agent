@@ -43,7 +43,7 @@ def cmd_add(args: argparse.Namespace) -> int:
     store = _open(args)
     try:
         sid = args.session or store.new_session()
-        store.add(args.content, session_id=sid, role=args.role)
+        store.add(args.content, session_id=sid, role=args.role, tags=tuple(args.tags))
         print(f"stored in session {sid}")
         return 0
     finally:
@@ -59,7 +59,12 @@ def cmd_remember(args: argparse.Namespace) -> int:
     """
     store = _open(args)
     try:
-        ids = store.remember(args.content, session_id=args.session, role=args.role)
+        ids = store.remember(
+            args.content,
+            session_id=args.session,
+            role=args.role,
+            tags=tuple(args.tags),
+        )
         if not ids:
             print("nothing durable in that turn -- not stored")
             return 0
@@ -88,7 +93,7 @@ def cmd_exchange(args: argparse.Namespace) -> int:
 def cmd_search(args: argparse.Namespace) -> int:
     store = _open(args)
     try:
-        result = store.search(args.query, top_k=args.top_k)
+        result = store.search(args.query, top_k=args.top_k, tags=tuple(args.tags) or None)
         if result.empty:
             print(f"no evidence for {args.query!r}")
             print(f"({result.sessions_searched} sessions searched)")
@@ -246,12 +251,14 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("content")
     a.add_argument("--session", "-s", default=None)
     a.add_argument("--role", default="user", choices=["user", "assistant", "system"])
+    a.add_argument("--tag", action="append", dest="tags", default=[], help="label; repeatable")
     a.set_defaults(func=cmd_add)
 
     r = sub.add_parser("remember", help="distil a turn into durable memories")
     r.add_argument("content")
     r.add_argument("--session", "-s", default=None)
     r.add_argument("--role", default="user", choices=["user", "assistant", "system"])
+    r.add_argument("--tag", action="append", dest="tags", default=[], help="label; repeatable")
     r.set_defaults(func=cmd_remember)
 
     e = sub.add_parser("exchange", help="store a user/assistant pair as one session")
@@ -263,6 +270,7 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("search", help="search and show evidence")
     s.add_argument("query")
     s.add_argument("--top-k", "-k", type=int, default=3)
+    s.add_argument("--tag", action="append", dest="tags", default=[], help="filter; repeatable")
     s.set_defaults(func=cmd_search)
 
     q = sub.add_parser("ask", help="retrieve and answer in one step")
