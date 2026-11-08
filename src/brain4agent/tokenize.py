@@ -26,10 +26,35 @@ from __future__ import annotations
 
 import math
 import re
+import unicodedata
 from collections import Counter
 from collections.abc import Callable
 
-_CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
+# Scripts that are written without spaces between words, and therefore need
+# character bigrams rather than whitespace splitting. The list is longer than
+# "Han" on purpose; each range below was silently dropping text before it was
+# added (see tests/test_cjk.py).
+#
+#   \u3040-\u30ff    Hiragana + Katakana
+#   \u3400-\u4dbf    CJK Unified Ideographs Extension A
+#   \u4e00-\u9fff    CJK Unified Ideographs
+#   \uf900-\ufaff    CJK Compatibility Ideographs
+#   \uac00-\ud7af    Hangul Syllables
+#   \uff66-\uff9f    Halfwidth Katakana (normalised to fullwidth by NFKC, listed
+#                    so a lone one never falls into the Latin word class)
+#   \U00020000-\U0002ffff  CJK Extensions B-F, supplementary plane
+#   \U00030000-\U0003134f  CJK Extension G
+_CJK_CLASS = (
+    r"\u3040-\u30ff"
+    r"\u3400-\u4dbf"
+    r"\u4e00-\u9fff"
+    r"\uf900-\ufaff"
+    r"\uac00-\ud7af"
+    r"\uff66-\uff9f"
+    r"\U00020000-\U0002ffff"
+    r"\U00030000-\U0003134f"
+)
+_CJK = re.compile(f"[{_CJK_CLASS}]")
 _WORD = re.compile(r"[a-z0-9_]+")
 
 # Function characters. Used only to decide whether a bigram carries signal; never
@@ -37,15 +62,142 @@ _WORD = re.compile(r"[a-z0-9_]+")
 # cutting at these destroys the word instead of separating filler from it.
 _CJK_STOP = frozenset("的了是在和与就都而及或吧呢吗啊呀哦嗯我你他她它这那一个们")
 
-_CJK_RUN = re.compile(
-    r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+"
-    r"|[^\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]+"
+_CJK_RUN = re.compile(f"[{_CJK_CLASS}]+|[^{_CJK_CLASS}]+")
+
+
+# Latin letters that decompose to a base plus combining marks, built once at
+# import. `str.translate` walks this in C; the equivalent per-character loop was
+# 2.3x slower on Chinese text.
+#
+# The ranges are the three blocks that actually carry precomposed Latin letters:
+# Latin-1 Supplement (à-ÿ), Latin Extended-A and -B (Ā-ɏ), and Latin Extended
+# Additional (Ạ-ỹ, which is where Vietnamese lives -- U+1EA5 ấ is well past
+# U+0250 and was missed on the first attempt).
+_LATIN_RANGES = ((0x00C0, 0x0250), (0x1E00, 0x1F00))
+
+
+def _latin_fold_table() -> dict[int, str]:
+    table: dict[int, str] = {}
+    for lo, hi in _LATIN_RANGES:
+        for cp in range(lo, hi):
+            base = unicodedata.normalize("NFD", chr(cp))
+            if len(base) > 1 and all(unicodedata.combining(c) for c in base[1:]):
+                table[cp] = base[0]
+    return table
+
+
+_HIRAGANA = re.compile(r"[\u3041-\u3096]")
+_NEEDS_LATIN_FOLD = re.compile(r"[\u00c0-\u024f\u1e00-\u1eff]")
+_LATIN_FOLD = _latin_fold_table()
+
+
+def _fold(text: str) -> str:
+    """Normalise compatibility forms and drop diacritics from Latin letters.
+
+    Three different problems, one pass, and the order matters:
+
+    - NFKC folds halfwidth katakana (ｷｰﾜｰﾄﾞ) to fullwidth (キーワード). Without
+      it those characters matched neither `_CJK` nor `_WORD` and vanished from
+      the index entirely.
+    - NFKC leaves a halfwidth voiced mark as `ト` + U+309B rather than the single
+      `ド`, so `_merge_kana_marks` puts the two back together afterwards.
+    - Accented Latin letters are folded to their unaccented base, so `vấn`
+      becomes `van` instead of `v` + `n`. This is a lookup table rather than a
+      per-character NFD loop: the loop form was 2.3x slower on Chinese text
+      (0.21 -> 0.47 ms per tokenize), and this is on the query path.
+
+    Folding only Latin is deliberate. Applying NFD to a voiced kana decomposes
+    ド into ト + U+3099, which is a combining mark too, so a blanket
+    "drop the marks" pass turned every ガ行 into its unvoiced pair silently.
+    Hangul has the same shape of hazard: 키 decomposes to two Jamo letters.
+    """
+    text = unicodedata.normalize("NFKC", text)
+    text = _merge_kana_marks(text)
+    # Most text -- anything written in Han, kana or Hangul -- has no precomposed
+    # Latin letter at all, and translate() on a 200-character string is ~39 us.
+    if not _NEEDS_LATIN_FOLD.search(text):
+        return text
+    return text.translate(_LATIN_FOLD)
+
+
+# Halfwidth katakana followed by the (already NFKC-folded) voiced or semi-voiced
+# mark. NFKC does not compose these, so ﾄﾞ arrives as ト ゛ instead of ド.
+_KANA_VOICED = {
+    "ウ": "ヴ",
+    "カ": "ガ",
+    "キ": "ギ",
+    "ク": "グ",
+    "ケ": "ゲ",
+    "コ": "ゴ",
+    "サ": "ザ",
+    "シ": "ジ",
+    "ス": "ズ",
+    "セ": "ゼ",
+    "ソ": "ゾ",
+    "タ": "ダ",
+    "チ": "ヂ",
+    "ツ": "ヅ",
+    "テ": "デ",
+    "ト": "ド",
+    "ハ": "バ",
+    "ヒ": "ビ",
+    "フ": "ブ",
+    "ヘ": "ベ",
+    "ホ": "ボ",
+}
+_KANA_SEMI = {
+    "ハ": "パ",
+    "ヒ": "ピ",
+    "フ": "プ",
+    "ヘ": "ペ",
+    "ホ": "ポ",
+}
+_HIRAGANA_TO_KATAKANA = str.maketrans(
+    "ぁあぃいぅうぇえぉおかがきぎくぐけげこごさざしじすずせぜそぞ"
+    "ただちぢっつづてでとどなにぬねのはばぱひびぴふぶぷへべぺほぼぽまみむめも"
+    "ゃやゅゆょよらりるれろゎわゐゑをんゔ",
+    "ァアィイゥウェエォオカガキギクグケゲコゴサザシジスズセゼソゾ"
+    "タダチヂッツヅテデトドナニヌネノハバパヒビピフブプヘベペホボポマミムメモ"
+    "ャヤュユョヨラリルレロヮワヰヱヲンヴ",
 )
+
+
+def _merge_kana_marks(text: str) -> str:
+    """Recompose voice marks NFKC left detached, then fold hiragana to katakana.
+
+    Katakana and hiragana are the same sounds written two ways, and a memory
+    written in one should be found by a query in the other. Folding them means
+    キーワード and きーわーど share bigrams instead of being disjoint vocabularies.
+
+    Fast path first: Chinese and Korean contain neither a stray voice mark nor
+    hiragana, and the character loop below was the single largest cost in
+    tokenisation (111 of 422 microseconds) when it ran unconditionally.
+    """
+    if "゛" not in text and "゜" not in text:
+        if not _HIRAGANA.search(text):
+            return text
+        return text.translate(_HIRAGANA_TO_KATAKANA)
+
+    out: list[str] = []
+    i = 0
+    while i < len(text):
+        ch = text[i]
+        if i + 1 < len(text) and text[i + 1] in ("゛", "゜"):
+            table = _KANA_VOICED if text[i + 1] == "゛" else _KANA_SEMI
+            if ch in table:
+                out.append(table[ch])
+                i += 2
+                continue
+            i += 1  # drop the orphaned mark
+            continue
+        out.append(ch)
+        i += 1
+    return "".join(out).translate(_HIRAGANA_TO_KATAKANA)
 
 
 def tokenize(text: str) -> list[str]:
     """Index terms: Latin words plus CJK character bigrams."""
-    text = text.lower()
+    text = _fold(text).lower()
     tokens: list[str] = []
 
     for chunk in re.split(r"(\s+)", text):
