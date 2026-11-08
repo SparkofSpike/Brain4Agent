@@ -56,9 +56,13 @@ the writer knows and the text does not say.
 ## Install
 
 ```bash
-pip install -e ".[precise]"   # recommended: adds jieba, hit@1 0.925
-pip install -e .              # zero dependencies: falls back to bigrams, hit@1 0.825
+pip install "Brain4Agent[precise]"   # recommended: adds jieba, hit@1 0.925
+pip install Brain4Agent              # zero dependencies: bigrams only, hit@1 0.825
 ```
+
+Windows and macOS both work; Python 3.11 or newer is required. The package is on
+PyPI as <https://pypi.org/project/Brain4Agent/>. To work on the code itself,
+`git clone` and `pip install -e ".[precise,dev]"`.
 
 `jieba` is a ~20 MB static dictionary. It is not required — the code degrades to
 bigrams on both sides of retrieval and keeps working.
