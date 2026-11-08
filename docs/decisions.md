@@ -1470,3 +1470,25 @@ recovers the *session* but the evidence's coverage score stays low, because the
 session text genuinely does not contain the query's words. Indexing the old
 memory's terms into the new one would fix that. Not done, and it is the next
 piece of work in this area.
+**Follow-up, done the same day.** Redirecting the hit recovered the session but
+left `coverage` at 0.00, because coverage is computed from the session's raw text
+and the replacement genuinely does not contain the old question's words. A search
+that returns the right memory while reporting "this session lacks 主库" is worse
+than an empty result — it looks like an answer and reads like a denial.
+
+`supersede()` now copies the old row's *token column* into the new row's. Terms,
+not content: the old row's tokens already carry anything **it** inherited, so a
+chain A -> B -> C passes A's vocabulary through C without re-segmenting history
+each time. `dict.fromkeys` keeps the merge idempotent, so re-linking does not
+grow the row.
+
+Coverage still reads raw text and stays low after a redirect. That is now honest
+rather than contradictory: `coverage` answers "how much of the question is
+literally in this session", and the answer is none. What changed is the *match*,
+not the text. Making coverage credit inherited terms would need an inherited-text
+column; the signal is not wrong, it is measuring something narrower than a reader
+might assume.
+
+One test was rewritten rather than repaired. `include_superseded=True` now
+returns **both** rows: the old one matches on its own text, the new one on what it
+inherited. The previous assertion had them mutually exclusive.
