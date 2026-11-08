@@ -19,6 +19,9 @@ Without it, everything still works.
 - [Against the frontier](#against-the-frontier)
 - [Status](#status)
 - [Design decisions](#design-decisions)
+- [Contributing](#contributing)
+- [Special thanks](#special-thanks)
+- [License](#license)
 
 ## What it is
 
