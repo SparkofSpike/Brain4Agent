@@ -386,3 +386,7 @@ A change to retrieval, tokenisation, or scoring that lowers it is a regression.
 
 Changes to a design decision belong in `docs/decisions.md` as a new entry, with
 the measurement that justifies it.
+
+## License
+
+Apache-2.0. See [LICENSE](LICENSE).

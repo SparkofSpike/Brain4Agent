@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]  # 77 is the first with PEP 639 license support
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -8,6 +8,8 @@ version = "0.1.0"
 description = "Long-term memory for agents. Chinese-first, split read/write paths, explicit abstention."
 requires-python = ">=3.11"
 dependencies = []
+license = "Apache-2.0"
+license-files = ["LICENSE"]
 
 [project.scripts]
 brain4agent = "brain4agent.cli:main"

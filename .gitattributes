@@ -1,0 +1,6 @@
+
+
+# License texts are reproduced byte for byte. Git's line-ending conversion would
+# change Apache-2.0 from 11358 bytes to 11560 and make it stop matching the
+# canonical copy.
+LICENSE text eol=lf
