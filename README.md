@@ -15,6 +15,7 @@ Without it, everything still works.
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Benchmarks](#benchmarks)
+- [How much of this is sampling noise](#how-much-of-this-is-sampling-noise)
 - [Against the frontier](#against-the-frontier)
 - [Status](#status)
 - [Design decisions](#design-decisions)
@@ -451,6 +452,34 @@ no memory:
 
 0.81 s × 30 memory lookups in a task is 24 seconds of added latency, spent on a
 judgement the calling agent could make while it is already reasoning.
+
+### How much of this is sampling noise
+
+77 cases is a small benchmark, and small benchmarks produce wide intervals. Every
+number on this page therefore gets a Wilson 95% interval:
+
+| result | fraction | 95% CI | width |
+|---|---|---|---|
+| PrecisionMemBench, this store | 64/77 = 0.8312 | 0.7323 – 0.8986 | 16.6 pp |
+| PrecisionMemBench, open-knowledge-format | 36/77 = 0.4675 | 0.3603 – 0.5779 | 21.8 pp |
+| Chinese hit@1 (40 answerable) | 37/40 = 0.9250 | 0.8014 – 0.9742 | 17.3 pp |
+| LoCoMo hit@1 | 960/1531 = 0.6270 | 0.6025 – 0.6509 | 4.8 pp |
+| LoCoMo hit@5 | 1355/1531 = 0.8850 | 0.8681 – 0.9001 | 3.2 pp |
+
+The intervals are wide, and that is the honest cost of 77 cases. The comparison
+still holds: **this store's lower bound, 0.7323, is 15 points above the previous
+best's upper bound, 0.5779.** The intervals do not overlap. A 36-point gap does
+not fit inside a 17-point interval.
+
+The Chinese number is the one to treat carefully. 37 of 40 gives [0.80, 0.97];
+the point estimate 0.925 should not be quoted as though it were precise. It is a
+direction, not a value.
+
+Two things this table cannot fix. **PrecisionMemBench is one benchmark**; a second
+corpus with the same shape would either confirm the effect or show it was specific
+to these 35 beliefs. And **no independent party has reproduced 0.8312** — the
+data and harness are committed, so it is reproducible, but reproducible-by-me is
+not the same as reproduced-by-someone-else.
 
 ## Against the frontier
 
