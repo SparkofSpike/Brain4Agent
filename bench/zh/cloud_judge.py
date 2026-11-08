@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import time
 import urllib.error
@@ -27,7 +28,14 @@ from pathlib import Path
 from bench.zh.loader import load_zh
 
 RESULTS = Path(__file__).parent.parent / "results"
-CONFIG = Path(r"/home/user\.codewhale\config.toml")
+# Config location is resolved at runtime, never hard-coded: this file
+# ships in a public repo and must not name anyone's home directory.
+CONFIG = Path(
+    os.environ.get(
+        "BRAIN4AGENT_JUDGE_CONFIG",
+        Path.home() / ".codewhale" / "config.toml",
+    )
+)
 
 SYSTEM = "You answer with exactly one word: YES or NO. Nothing else."
 TEMPLATE = (

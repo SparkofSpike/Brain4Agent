@@ -39,7 +39,7 @@ def store():
             assistant="根因在 keywords.py 第 443 行",
         )
         s.add_exchange(
-            user="杭州那台测试机的地址是 114.215.175.63",
+            user="杭州那台测试机的地址是 203.0.113.42",
             assistant="部署目录 /opt/demo-app",
         )
         yield s

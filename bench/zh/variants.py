@@ -28,7 +28,7 @@ ZH_EVAL = Path(__file__).parent / "zh_eval.json"
 # that "媒体投稿界面" is not half-replaced by "媒体投稿".
 SUBS: list[tuple[str, str]] = [
     # cities and machines
-    ("114.215.175.63", "10.20.30.40"),
+    ("203.0.113.42", "10.20.30.40"),
     ("/opt/demo-app", "/opt/alpha-test"),
     ("杭州", "成都"),
     ("demo-app.service", "alpha-test.service"),

@@ -40,7 +40,7 @@ def test_search_miss_returns_one(db: Path, capsys: pytest.CaptureFixture[str]) -
 
 
 def test_search_shows_missing_terms(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
-    main(["--db", str(db), "add", "杭州测试机的地址是 114.215.175.63"])
+    main(["--db", str(db), "add", "杭州测试机的地址是 203.0.113.42"])
     capsys.readouterr()
 
     main(["--db", str(db), "search", "杭州测试机上装的是什么数据库"])

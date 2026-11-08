@@ -27,7 +27,7 @@ def _mem(mid: str, sid: str, content: str, turn: int) -> MemoryItem:
 
 def _corpus() -> list[MemoryItem]:
     return [
-        _mem("s1:0", "s1", "杭州那台测试机的地址是 114.215.175.63，部署目录 /opt/demo-app", 0),
+        _mem("s1:0", "s1", "杭州那台测试机的地址是 203.0.113.42，部署目录 /opt/demo-app", 0),
         _mem("s2:0", "s2", "媒体投稿界面增加了定时投放功能", 0),
         _mem("s3:0", "s3", "E 盘清理释放了 110.06GB", 0),
     ]

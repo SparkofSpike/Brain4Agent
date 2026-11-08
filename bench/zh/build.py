@@ -275,7 +275,7 @@ SESSIONS: list[dict[str, object]] = [
             ),
             (
                 "assistant",
-                "114.215.175.63，部署目录 /opt/demo-app，服务名要用 systemd 的 demo-app.service。",
+                "203.0.113.42，部署目录 /opt/demo-app，服务名要用 systemd 的 demo-app.service。",
             ),
             (
                 "user",
@@ -704,7 +704,7 @@ QUESTIONS: list[dict[str, object]] = [
         "id": "zh014",
         "type": "single-session-user",
         "q": "杭州测试机的地址和部署目录是什么？",
-        "a": "114.215.175.63，部署在 /opt/demo-app。",
+        "a": "203.0.113.42，部署在 /opt/demo-app。",
         "gold": ["s11"],
     },
     {
