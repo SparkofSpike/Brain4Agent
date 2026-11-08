@@ -24,6 +24,7 @@ Client configuration (Claude Desktop, CodeWhale, anything MCP):
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sys
@@ -286,7 +287,20 @@ def _log(message: str) -> None:
     print(message, file=sys.stderr, flush=True)
 
 
+def _force_utf8_streams() -> None:
+    """Pin stdin/stdout to UTF-8, whatever the host locale says.
+
+    MCP frames are UTF-8 by specification. reconfigure is idempotent where the
+    locale already matches, and a no-op on streams that cannot be reconfigured
+    (a wrapped pipe, a test double).
+    """
+    for stream in (sys.stdin, sys.stdout):
+        with contextlib.suppress(AttributeError, ValueError):  # exotic streams
+            stream.reconfigure(encoding="utf-8")
+
+
 def main() -> int:
+    _force_utf8_streams()
     server = Server()
     _log(f"{SERVER_NAME} {__version__} listening on stdio, db={server.store.path}")
 

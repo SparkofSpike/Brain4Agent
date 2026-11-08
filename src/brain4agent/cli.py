@@ -12,6 +12,7 @@ but which word in the question the corpus never contained.
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import sys
@@ -233,7 +234,24 @@ def build_parser() -> argparse.ArgumentParser:
     return p
 
 
+def _force_utf8_output() -> None:
+    """Write UTF-8 to stdout/stderr, and never crash on an unencodable character.
+
+    On a Chinese Windows console the default encoding is cp936, so printing a
+    memory containing an emoji raised UnicodeEncodeError and exited non-zero
+    after the work had already succeeded. errors="replace" keeps the exit code
+    honest at the cost of a garbled glyph.
+
+    Note this cannot fix argv: Python decoded the command line with the locale
+    encoding before this ran. Set PYTHONUTF8=1 on Windows for full support.
+    """
+    for stream in (sys.stdout, sys.stderr):
+        with contextlib.suppress(AttributeError, ValueError):  # exotic streams
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv: list[str] | None = None) -> int:
+    _force_utf8_output()
     args = build_parser().parse_args(argv)
     return int(args.func(args))
 

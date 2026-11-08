@@ -163,6 +163,50 @@ class TestTools:
 
 
 class TestWire:
+    def test_stdio_survives_gbk_locale(self, tmp_path: Path) -> None:
+        """The host locale must not decide whether the server can read UTF-8.
+
+        On a Chinese Windows install sys.stdin defaults to cp936. Before the
+        fix this returned 1 with an empty stdout and a UnicodeDecodeError,
+        because the end-to-end test set PYTHONIOENCODING=utf-8 and hid it.
+        """
+        db = tmp_path / "gbk.db"
+        env = {
+            "BRAIN4AGENT_DB": str(db),
+            "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
+            "PYTHONIOENCODING": "cp936",
+        }
+        payload = json.dumps(
+            {
+                "jsonrpc": "2.0",
+                "id": 1,
+                "method": "tools/call",
+                "params": {
+                    "name": "b4a_remember",
+                    "arguments": {"content": "中文内容测试🐱"},
+                },
+            },
+            ensure_ascii=False,
+        )
+
+        proc = subprocess.run(
+            [sys.executable, "-m", "brain4agent.mcp_server"],
+            input=(payload + "\n").encode("utf-8"),
+            capture_output=True,
+            env={**__import__("os").environ, **env},
+            timeout=120,
+        )
+
+        assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
+        assert proc.stdout, "no response under cp936"
+        json.loads(proc.stdout.decode("utf-8"))
+
+        from brain4agent import MemoryStore
+
+        with MemoryStore(db) as store:
+            contents = [t.content for turns in store._by_session.values() for t in turns]
+        assert contents == ["中文内容测试🐱"], f"stdout={proc.stdout.decode('utf-8', 'replace')!r}"
+
     def test_stdio_roundtrip(self, tmp_path: Path) -> None:
         """The real process, the real stream -- stdout must be JSON only."""
         db = tmp_path / "wire.db"

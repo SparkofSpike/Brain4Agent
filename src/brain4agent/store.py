@@ -462,5 +462,10 @@ class MemoryStore:
         No re-sorting: ``_by_session`` is already in rowid order, and sorting by
         a second-precision timestamp would shuffle turns written in the same
         second.
+
+        Refreshes first. A long-lived MCP server holds one store while writes
+        from the CLI or a skill land in the same file; without this, b4a_session
+        would answer from a snapshot taken at startup.
         """
+        self._ensure_fresh()
         return list(self._by_session.get(session_id, []))

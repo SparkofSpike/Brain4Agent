@@ -149,7 +149,6 @@ class TestStoreBasics:
         assert store.search("说明文字").best().session_id == "long"
 
     def test_content_length_is_capped(self, store: MemoryStore) -> None:
-
         """A conversation turn is not a document; fail loudly rather than slowly."""
         with pytest.raises(ValueError, match="too long"):
             store.add("中" * 100_001, session_id="big")
@@ -171,6 +170,16 @@ class TestStoreBasics:
 
                 b.add("乙写入的内容", session_id="y")
                 assert a.search("乙写入的内容").best().session_id == "y"
+
+    def test_session_refreshes_across_instances(self) -> None:
+        """b4a_session in a long-lived MCP server must not serve a startup snapshot."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "sess.db"
+            with MemoryStore(db) as a, MemoryStore(db) as b:
+                a.add("第一条", session_id="shared")
+                assert [m.content for m in b.session("shared")] == ["第一条"]
+                a.add("第二条", session_id="shared")
+                assert len(b.session("shared")) == 2
 
     def test_refresh_picks_up_sibling_writes(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
