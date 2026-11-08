@@ -555,6 +555,12 @@ first benchmarks were written.
   badly loses detail the reader could have weighed themselves.
 - **Multimodal.** Out of scope.
 
+**Recently added:**
+
+- **Near-duplicate detection.** A SimHash fingerprint per memory; `search` returns
+  `possible_duplicates` when two memories may state the same thing. It reports and
+  does not merge — the calling agent reads both and decides (D-028).
+
 **Recently fixed:**
 
 - **A replaced memory used to vanish.** `supersede(old, new)` hid the old one, but
@@ -571,6 +577,8 @@ first benchmarks were written.
   weighs importance rather than age is the next real piece of work.
 - **A recall scheduler.** `recall-context` exists for hooks, but nothing decides
   when to run it. Every-turn is cheap (1.5 ms) and probably too noisy.
+- **Frequency-based ranking.** `accesses` is counted on every search; nothing ranks
+  by it. A hypothesis waiting for a measurement, not an oversight.
 - **Multi-retriever fusion.** One BM25 today. A second lexical retriever could be
   tried without breaking the model-free rule.
 - **Schema on `kind`.** It is a free-form string with no validation.
