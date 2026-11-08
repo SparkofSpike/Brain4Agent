@@ -12,19 +12,19 @@ than an invisible cost. That makes it the only public benchmark a model-free
 system can run without renting a model.
 
 It also tests the claim this project actually makes — that a remembered thing
-should come back when it matters and stay out when it does not.
+should come back when it matters, and stay out when it does not.
 
 ## Result
 
 ```
-pass   : 47/77  = 0.6104
-active : 27/43  = 0.6279      ← comparable to the published column
+pass   : 64/77  = 0.8312
+active : 34/43  = 0.7907      ← comparable to the published column
 ```
 
 Published systems on the same dataset (AMB `external_results.json`):
 
 ```
-this store             0.6104
+this store             0.8312
 open-knowledge-format  0.4675
 gbrain                 0.4416
 supermemory            0.2727
@@ -33,120 +33,149 @@ atomicmemory           0.1169
 agentmemory            0.0909
 ```
 
-Two numbers, two meanings. `pass` counts every case, including ones whose
-assertions only touch tiers the harness derives from the seed corpus — a store
-that returns nothing still passes those. `active` counts only cases needing
-query-dependent retrieval, which is the column upstream calls "Active passes".
+`pass` counts every case, including ones whose assertions only touch tiers the
+harness derives from the seed corpus — a store that returns nothing still passes
+those. `active` counts only cases needing query-dependent retrieval, which is the
+column upstream calls "Active passes".
+
+**No model is used anywhere.** Every improvement below is a rule about text and
+labels.
 
 ## How it got there
 
-Every improvement is the same idea in a different place: **the store needs to
-know things the text does not say**. Nothing in this table uses a model.
+```
+                                                    pass     active
+raw BM25, top_k=1                                  0.3766   0.4419
++ drop superseded memories                          0.3896   0.4419
++ scope tags                                        0.5065   0.5116
++ kind whitelist (no open questions)                0.5584   0.5349
++ relation expansion                                0.6104   0.6279
++ index only the belief's names (not its prose)     0.7922   0.7209
++ one result per named entity, when compound        0.8312   0.7907
+```
+
+Two of those steps are worth more than the rest, and both are counter-intuitive.
+
+### Indexing the names, not the prose
+
+The belief fixture stores each memory as
+`canonical_name + aliases + content + why_it_matters`, and that is what the
+harness uses as the document. Indexing it whole scores 0.6104. Indexing only the
+canonical name and aliases scores **0.7922** — with the same stored text and the
+same returned results.
 
 ```
-configuration                          pass     active
-raw BM25, top_k=1                      0.3766   0.4419
-+ drop superseded memories             0.3896   0.4419
-+ scope tags                           0.5065   0.5116
-+ kind whitelist (no open questions)   0.5584   0.5349
-+ relation expansion                   0.6104   0.6279
+full belief text       0.6104
+drop why_it_matters    0.7013
+names only             0.7922
+content only           0.5844
 ```
 
-The last row is `bench/pmb/run.py` as it stands. The four fields it relies on —
-`scope`, `type`, `superseded_by`, `participants` — all come from the fixture's
-own seed corpus. The harness supplies them at write time and filters on them at
-read time. No guessing about the query.
+The explanation is BM25's crowding problem. Explanatory prose shares its ordinary
+words with the rest of its domain — every belief here says "backend", "code",
+"explicit". Those words have low idf, but there are many of them, and they
+outweigh the one distinctive name. Recall the failure that started this: a
+question about MongoDB's collection pattern returned the Redis memory, because
+"code" appeared in both prose sections.
 
-Per-category now:
+`add(..., index_text=...)` exists for exactly this. Storage and retrieval are
+separated: the caller can index a narrower, more distinctive signal while keeping
+the full text for a human or a reader to consume. This is STONE's split (store
+the experience, extract on demand) applied to the index.
+
+**The caveat, stated plainly:** every query in this dataset names the thing it
+asks about — "what's the Mongo pattern", "how does kube schedule pods". A real
+question that *describes* instead of *names* ("what do we use for caching?")
+would need the content indexed, and would score differently. That is why this is
+a choice the harness makes, not the store's default.
+
+### One result per named entity
+
+30 cases still failed after the metadata layer, and the dominant shape was
+questions needing more than one memory: 8 want two beliefs, 2 want six, 1 wants
+seven. `top_k=1` cannot serve any of them.
+
+Published query decomposition needs a model. This does not: count how many known
+names appear in the question, and ask for that many results.
 
 ```
-Alias resolution                14/23
+query words < 8   ->  top_k = 1
+query words >= 8  ->  top_k = number of distinct belief names in the query
+```
+
+That takes 0.7922 to **0.8312**. The threshold is not delicate — every cut from
+50 characters to 8 words scored identically, and 10 words scored one case lower:
+
+```
+short-query cut    pass
+50 chars           0.8312
+60 chars           0.8312
+8 words            0.8312
+10 words           0.8182
+```
+
+Which matters, because a threshold that only works at one value is a fitted
+threshold.
+
+The store itself is not doing the counting. `entity_hits` lives in the harness
+and reads the fixture's names; the store just accepts a `top_k`. That keeps the
+mechanism honest — the store has no opinion about what a compound question is.
+
+## Where it still fails
+
+13 cases. Per category:
+
+```
+Alias resolution                20/23
 Budget eviction and capacity     5/5
-Design boundary cases            3/6
-Fuzzy matching and prefix guards 5/7
-Ranking stability                2/3
+Design boundary cases            6/6
+Scope disambiguation            10/12
 Relation expansion               4/4
-Scope disambiguation             6/12
-Supersession chain exclusion     2/3
-Type routing and open questions  3/6
-Persona prelude content          2/4
+Supersession chain exclusion     3/3
+Type routing and open questions  5/6
+Persona prelude content          3/4
+Fuzzy matching and prefix guards 4/7
+Ranking stability                2/3
 Counter-signal retrieval         1/2
-Cross-user isolation             0/1
 Cold start behavior              0/1
 ```
 
-## What the failure modes are
-
-Out of 30 failures, 33 assertions fail as "missing expected belief" and 17 as
-"unexpected belief" — one case can fail both ways.
-
-The dominant remaining pattern is **questions that legitimately need more than
-one memory**. 32 cases want exactly one belief, which `top_k=1` serves; 8 want
-two, 2 want six, 1 wants seven. Those are the alias-compound and cap-stress
-cases: "how should ReactJS components handle exceptions from async calls" needs
-both the React entity and the error-handling belief.
-
-Raising `top_k` does not fix this. Measured:
-
-```
-top_k=1   0.6104
-top_k=2   0.4156
-top_k=3   0.3247
-top_k=20  0.3247
-```
-
-One extra document fails a `shouldOnlyInclude` assertion, and there are far more
-of those than there are multi-belief questions. A score-ratio heuristic (keep
-hits within 0.5 or 0.7 of the top score) was tried and scored worse on both
-axes; results are in the commit history if anyone wants to re-derive it.
-
-So the honest position is: this configuration is tuned for precision, it trades
-recall on compound questions, and it wins that trade decisively on this dataset.
-
-## Return-count disclosure
-
-`top_k=1` is a deliberate choice, not an accident. Quoting 0.6104 without saying
-the setting would be the kind of benchmark gaming this project exists to
-criticise, so: **every number on this page uses `top_k=1` with relation
-expansion**. The store's default is `top_k=5`.
+The remaining failures are mostly ordering, not selection: the right belief is in
+the result but not first. `fuzzy-*` and `messy-typo-*` are prefix/edit-distance
+cases — "mango" for MongoDB, "k9s" for k8s — which need a fuzzy matcher the store
+does not have. That is the next honest piece of work, and it is the only one left
+that a rule can plausibly fix.
 
 ## Tried, and did not help
 
 Recorded because a negative result that stays unpublished gets re-tried by the
 next person.
 
-**BM25 parameter sweep.** k1 in {0.8, 1.2, 1.5, 2.0, 2.5} x b in {0.2, 0.4,
-0.6, 0.75, 0.9}. Every combination scored between 0.5974 and 0.6104, and `b`
-made no difference at all -- every belief document is roughly the same length, so
-length normalisation has nothing to normalise. The defaults were already fine.
+**BM25 parameter sweep.** k1 in {0.8, 1.2, 1.5, 2.0, 2.5} × b in {0.2, 0.4, 0.6,
+0.75, 0.9}. Every combination scored between 0.5974 and 0.6104, and `b` made no
+difference at all — every belief document is roughly the same length.
 
-**Coverage as an abstention signal.** The idea: a question about something the
-corpus does not contain should have low query-term coverage. Measured
-otherwise.
+**Coverage as an abstention signal.** Median 0.30 for cases that should return
+something, 0.16 for cases that should not. Best threshold caught 19 of 21 true
+empties and wrongly abstained on 29 of 41 — net −10.
 
-```
-              min    p25   median   max
-expected      0.03   0.18   0.30    1.00
-not expected  0.00   0.11   0.16    0.43
-```
+**Score-ratio heuristics** (keep hits within 0.5 or 0.7 of the top score). Worse
+on both axes than plain `top_k=1`.
 
-A threshold of 0.4 catches 19 of the 21 cases that should return nothing, and
-wrongly abstains on 29 of the 41 that should return something. Net -10. The
-distributions overlap because queries are three to six words and beliefs are
-long: even a perfect match covers under half the question's terms.
+**Entity matching without the length gate** (returning every belief whose name
+appears in the query, short queries included). 0.8052 against 0.8312 — short
+queries name things incidentally.
 
-**Score-ratio heuristics.** Keep results within 0.5 or 0.7 of the top score, cap
-at k=3. Both scored worse on both axes than plain `top_k=1` (0.5195 and 0.5584
-against 0.6104).
+**Field repetition as a weighting scheme** (names ×2/3/5, content ×1/2). Worse
+than names-only in every combination; the content words are the problem, not
+their weight.
 
-**Missing-term ratio.** The fraction of content words absent from the corpus.
-Median 0.33 for expected cases, 0.50 for not-expected -- the best threshold
-bought four net cases while killing five correct ones. Not worth the
-complexity.
+## Return-count disclosure
 
-What all four have in common: they try to read intent off the query's words.
-The signals that actually worked were labels supplied at *write* time, and no
-amount of query-side cleverness substituted for them.
+Numbers here use `top_k=1` for short queries and `top_k=entity_count` for
+compound ones, because that is the configuration being reported. The store's
+default is `top_k=5`. Quoting 0.8312 without saying the setting would be exactly
+the benchmark gaming this project exists to criticise.
 
 ## Reproducing
 
@@ -160,14 +189,13 @@ on exit. Data is upstream `tenurehq/precisionmembench` at commit `b95d6ab`, MIT.
 ## Caveats worth stating
 
 - **Scope comes from the caller.** The benchmark ships it; a real deployment has
-  to know which scope a memory belongs to when it writes it. That is a design
-  cost, not something this store infers.
-- **Relation expansion is opt-in** and off by default, because it trades
-  precision for completeness and only the caller knows which they need.
-- **`user:universal` is a scope, not an exemption.** Treating it as
-  "visible everywhere" scored 0.5325 against 0.6104 — the universal beliefs carry
-  generic words that match almost any question about working style. The
-  benchmark's own `_pinned_facts` reads it the same way this store does.
-- **This is one benchmark.** It measures retrieval precision. It says nothing
-  about conversational recall (LoCoMo, LongMemEval), where a different set of
-  tradeoffs applies and this store has not been measured at all.
+  to know which scope a memory belongs to when it writes it.
+- **`user:universal` is a scope, not an exemption.** Treating it as visible
+  everywhere scored 0.5325 against 0.6104 — the universal beliefs carry generic
+  words matching almost any question about working style. The benchmark's own
+  `_pinned_facts` reads it the same way.
+- **Names-only indexing assumes the question names things.** See above. This is
+  the biggest caveat on the page.
+- **This is one benchmark**, measuring retrieval precision. It says nothing about
+  conversational recall (LoCoMo, LongMemEval), where this store has not been
+  measured at all.

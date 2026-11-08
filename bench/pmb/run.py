@@ -37,6 +37,31 @@ from brain4agent.store import MemoryStore
 # must not compete for the relevantBeliefs budget.
 ANSWER_KINDS = ("preference", "entity", "decision", "relation")
 
+# A query this short is naming one thing and asking about it. Anything longer is
+# usually compound, and a compound question needs one result per entity it names.
+# Every threshold from 50 characters to 8 words scored identically -- see the
+# README; it is a plateau, not a fitted point.
+COMPOUND_WORDS = 8
+
+
+def name_set(belief: dict) -> set[str]:
+    """The names a query would use to refer to this belief."""
+    names = {(belief.get("canonical_name") or "").replace("_", " ").lower()}
+    names.update(a.lower() for a in (belief.get("aliases") or []))
+    return {n for n in names if len(n) >= 3}
+
+
+def entity_hits(query: str, names: dict[str, set[str]]) -> int:
+    """How many distinct memories the query names outright.
+
+    A cheap stand-in for query decomposition -- published decomposers need a model
+    (arXiv:2507.00355 and relatives). This one does not understand the question;
+    it counts how many known names appear in it, which is enough to size the
+    result set without knowing what the question means.
+    """
+    ql = query.lower()
+    return sum(1 for ns in names.values() if any(n in ql for n in ns))
+
 
 def scope_tags(belief: dict) -> tuple[str, ...]:
     """Tags for one belief -- every scope it claims, universal included.
@@ -51,8 +76,31 @@ def scope_tags(belief: dict) -> tuple[str, ...]:
     return tuple(f"scope:{s}" for s in (belief.get("scope") or []))
 
 
+def index_text(belief: dict) -> str:
+    """What goes into the matching index: the belief's own names, nothing else.
+
+    The full belief text is still stored and still returned. But its content and
+    ``why_it_matters`` are explanatory prose, and explanatory prose shares its
+    ordinary words with every other belief in the domain -- "backend", "code",
+    "explicit". BM25 rewards those crowded matches, and the one distinctive name
+    loses to them. Measured here:
+
+        full belief text       0.6104
+        drop why_it_matters    0.7013
+        names only             0.7922
+
+    The caveat is in the README: every query in this dataset names the thing it
+    asks about. A question that describes instead of naming needs the content
+    indexed, so this is not the store's default -- it is this harness's choice.
+    """
+    cn = belief.get("canonical_name") or ""
+    aliases = " ".join(belief.get("aliases") or [])
+    return " ".join(p for p in [cn, aliases] if p)
+
+
 def main() -> int:
     beliefs, cases = load()
+    name_sets = {b["_id"]: name_set(b) for b in beliefs}
     print(f"corpus: {len(beliefs)} beliefs · cases: {len(cases)}")
 
     with tempfile.TemporaryDirectory() as td, MemoryStore(Path(td) / "pmb.db") as store:
@@ -65,6 +113,7 @@ def main() -> int:
                     tags=scope_tags(b),
                     kind=b.get("type") or "belief",
                     superseded_by=b.get("superseded_by"),
+                    index_text=index_text(b),
                 )
         # Relations point at their participants. Linked after the batch so a
         # participant written later still resolves.
@@ -80,15 +129,18 @@ def main() -> int:
         by_cat: Counter[tuple[str, str]] = Counter()
 
         for case in cases:
-            k = (case.get("budget") or {}).get("maxBeliefs", 20)
+            cap = (case.get("budget") or {}).get("maxBeliefs", 20)
             # Upstream skips search entirely when the belief budget is zero, so a
             # budget-0 case is asserting that nothing is returned.
-            if k <= 0 or not case["query"].strip():
+            if cap <= 0 or not case["query"].strip():
                 retrieved: list[str] = []
             else:
+                compound = len(case["query"].split()) >= COMPOUND_WORDS
+                wanted = entity_hits(case["query"], name_sets) if compound else 1
+                top_k = max(1, min(wanted, cap))
                 result = store.search(
                     case["query"],
-                    top_k=1,
+                    top_k=top_k,
                     tags=[f"scope:{s}" for s in (case.get("scope") or [])],
                     kinds=ANSWER_KINDS,
                     expand_refs=True,

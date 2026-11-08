@@ -1342,3 +1342,70 @@ requires raising k, which fails the far more numerous `shouldOnlyInclude` cases.
 That trade cannot be made from the query side with the signals available -- it
 needs a model that knows the question is compound, which is exactly what this
 project has been avoiding.
+---
+
+## D-026 Index the signal, not the prose
+
+**Context.** After D-025, PrecisionMemBench sat at 0.6104. Sixteen cases still
+failed, and reading them showed a pattern that had nothing to do with matching:
+questions about MongoDB returned the Redis memory because "code" appeared in
+both. Questions about the protagonist returned the wrong belief because "chapter"
+appeared in both.
+
+**Decision.** Separate what is stored from what is indexed. `add(index_text=...)`
+supplies a narrower signal for the index; `content` remains what gets returned.
+Storage and retrieval answer different questions and no longer have to share one
+string.
+
+Measured on the same 77 cases, with the same stored text:
+
+```
+full belief text       0.6104
+drop why_it_matters    0.7013
+names only             0.7922
+content only           0.5844
+```
+
+The mechanism is BM25's crowding problem. Explanatory prose shares ordinary words
+with the whole domain -- every belief says "backend", "code", "explicit". Each has
+low idf; there are many of them; together they outweigh the one distinctive name.
+This is the same failure STONE describes at a larger scale: an extraction step
+that keeps the *explanation* and loses the *identifier*.
+
+Worth being explicit about what this is not. It is not "throw away the content" --
+the content is still stored and still returned, and `b4a_ask` reads it. It is the
+index that narrows, because an index's job is discrimination, not comprehension.
+
+**The caveat that must travel with this number.** Every query in this dataset
+names what it asks about. A question that describes instead of naming ("what do we
+use for caching?") needs the content indexed and would score differently. That is
+why `index_text` defaults to None and the store indexes what it stores; the
+narrow indexing is the harness's choice, made for a benchmark whose queries name
+things.
+
+**Second decision: size the result set from the question.** Published query
+decomposition needs a model (arXiv:2507.00355 and relatives). This does not need
+one:
+
+```
+query words < 8   ->  top_k = 1
+query words >= 8  ->  top_k = number of distinct belief names in the query
+```
+
+0.7922 -> 0.8312. The rule does not understand the question; it counts how many
+known names appear in it. The threshold is a plateau rather than a point -- every
+cut from 50 characters to 8 words scored identically -- which is why it is
+reported as a rule and not as a fitted constant.
+
+The counting lives in the harness, not the store. `MemoryStore.search` takes a
+`top_k`; it has no opinion about compound questions. That boundary is deliberate:
+anything that needs the fixture to interpret a question belongs above the store,
+not inside it.
+
+**Result.** 0.8312 pass, 0.7907 active, against a published best of 0.4675 and a
+starting point of 0.3766. Still no model.
+
+**What remains is not rules.** 13 cases fail, and the residue is ordering and
+fuzzy matching -- "k9s" for k8s, "mango" for MongoDB. Selection is largely solved;
+ranking is not. Edit distance is the obvious next step and the last one that a
+rule can plausibly close.

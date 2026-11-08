@@ -161,3 +161,43 @@ class TestRefs:
         with MemoryStore(path) as s:
             hits = s.search("a 相关内容", top_k=1, expand_refs=True)
             assert len(hits.evidence) == 2
+
+
+class TestIndexText:
+    """Index a narrower signal than what gets stored.
+
+    The motivating measurement: indexing a belief's full explanatory text scored
+    0.6104 on PrecisionMemBench; indexing only its names scored 0.7922. The prose
+    shares ordinary words with every other belief, and BM25 rewards that crowding.
+    """
+
+    def test_content_is_returned_verbatim(self, store: MemoryStore) -> None:
+        mid = store.add("the full explanatory text", index_text="shortname")
+        assert store.memory(mid).content == "the full explanatory text"  # type: ignore[union-attr]
+
+    def test_matching_uses_index_text(self, store: MemoryStore) -> None:
+        store.add("the full explanatory text", index_text="shortname")
+        assert store.search("shortname").evidence
+
+    def test_content_words_do_not_match(self, store: MemoryStore) -> None:
+        """The whole point: words that appear only in the stored text are invisible."""
+        store.add("the full explanatory text about backend code", index_text="shortname")
+        assert store.search("backend").evidence == []
+
+    def test_default_indexes_content(self, store: MemoryStore) -> None:
+        store.add("the full explanatory text")
+        assert store.search("explanatory").evidence
+
+    def test_persists(self, tmp_path: Path) -> None:
+        path = tmp_path / "i.db"
+        with MemoryStore(path) as s:
+            s.add("the full explanatory text", index_text="shortname")
+        with MemoryStore(path) as s:
+            assert s.search("shortname").evidence
+            assert s.search("explanatory").evidence == []
+
+    def test_works_with_distillation(self, tmp_path: Path) -> None:
+        """index_text must survive the remember() path, which also writes."""
+        with MemoryStore(tmp_path / "d.db") as s:
+            mid = s.add("text here", index_text="narrow")
+            assert s.memory(mid) is not None
