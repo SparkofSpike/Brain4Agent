@@ -7,8 +7,11 @@ the benchmark has stopped describing the product.
 
     python -m bench.zh.e2e
 
-Baseline from D-010 (BM25 over bigrams):
-    hit@1 0.825   hit@5 0.950   hit@10 1.000   MRR 0.8911
+BASELINE is D-010, the symmetric bigram/bigram implementation. The store now
+indexes with bigrams *and* words and queries with words (D-019), so it should sit
+above the baseline, not level with it.
+    baseline  hit@1 0.825  hit@5 0.950  hit@10 1.000  MRR 0.8911
+    expected  hit@1 0.925  hit@5 0.975  hit@10 1.000  MRR 0.9404
 """
 
 from __future__ import annotations
@@ -124,10 +127,9 @@ def main() -> int:
     for key in ("hit@1", "hit@5", "hit@10", "mrr"):
         got = result[key]
         base = BASELINE[key]
-        flag = (
-            "" if abs(got - base) < 1e-6 else ("  <-- DIFFERS" if abs(got - base) > 0.001 else "")
-        )
-        print(f"{key:8s} {got:12.4f} {base:10.4f}  {got - base:+8.4f}{flag}")
+        delta = got - base
+        flag = "" if abs(delta) <= 0.001 else ("  better" if delta > 0 else "  WORSE")
+        print(f"{key:8s} {got:12.4f} {base:10.4f}  {delta:+8.4f}{flag}")
 
     print()
     print("hit@1 by question type:")

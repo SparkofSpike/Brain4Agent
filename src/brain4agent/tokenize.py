@@ -27,6 +27,7 @@ from __future__ import annotations
 import math
 import re
 from collections import Counter
+from collections.abc import Callable
 
 _CJK = re.compile(r"[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]")
 _WORD = re.compile(r"[a-z0-9_]+")
@@ -113,16 +114,51 @@ def word_tokens(text: str) -> list[str]:
     return [w for w in out if w and not w.isspace()]
 
 
+def jieba_tokens(text: str) -> list[str]:
+    """Dictionary segmentation. Falls back to bigrams without jieba."""
+    jieba = load_jieba()
+    if jieba is None:
+        return tokenize(text)
+    return [w.strip().lower() for w in jieba.lcut(text) if w.strip()]
+
+
+def both_tokens(text: str) -> list[str]:
+    """Union of bigrams and dictionary words -- the index-side tokeniser.
+
+    Measured, not assumed (bench/zh/indexing_probe.py): indexing with both and
+    querying with words moved hit@1 from 0.825 to 0.925 and MRR from 0.891 to
+    0.940, while every symmetric pairing stayed at or below 0.875. The wide side
+    is the writing side; the precise side is the asking side.
+
+    Duplicate terms inflate tf slightly where a bigram and a word coincide. That
+    is a bias in favour of terms both tokenisers agree on, which is not the same
+    as a bug, and the measured result already includes it.
+    """
+    return tokenize(text) + jieba_tokens(text)
+
+
 class BM25:
     """Okapi BM25 over a fixed corpus.
 
     Deliberately the classic formulation: the point of a baseline is that nobody
     has to trust it.
+
+    ``index_fn`` and ``query_fn`` are separate because they are genuinely
+    different jobs. Written memories want every clue kept; a question wants its
+    noise dropped. Sharing one tokeniser forces a choice that loses on one side.
     """
 
-    def __init__(self, k1: float = 1.5, b: float = 0.75) -> None:
+    def __init__(
+        self,
+        k1: float = 1.5,
+        b: float = 0.75,
+        index_fn: Callable[[str], list[str]] | None = None,
+        query_fn: Callable[[str], list[str]] | None = None,
+    ) -> None:
         self.k1 = k1
         self.b = b
+        self.index_fn = index_fn or tokenize
+        self.query_fn = query_fn or tokenize
         self._ids: list[str] = []
         self._docs: list[Counter[str]] = []
         self._lens: list[int] = []
@@ -135,6 +171,16 @@ class BM25:
         return self._n
 
     def index(self, items: list[tuple[str, str]]) -> None:
+        """Index raw text, tokenising with ``index_fn``."""
+        self.index_tokens([(i, self.index_fn(t)) for i, t in items])
+
+    def index_tokens(self, items: list[tuple[str, list[str]]]) -> None:
+        """Index pre-tokenised documents.
+
+        Lets a store persist its tokens and skip re-segmenting the corpus on
+        every rebuild, which is the difference between a 3 ms rebuild and a
+        30 ms one at a hundred turns.
+        """
         self._ids = [i for i, _ in items]
         # Insertion order, used to break score ties. Ties are not a corner case
         # here: an entity-swapped hard negative scores within a hair of its
@@ -146,8 +192,8 @@ class BM25:
         self._lens = []
         self._df = Counter()
 
-        for _, text in items:
-            counts = Counter(tokenize(text))
+        for _, toks in items:
+            counts = Counter(toks)
             self._docs.append(counts)
             self._lens.append(sum(counts.values()))
             for term in counts:
@@ -159,7 +205,7 @@ class BM25:
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         if not self._n:
             return []
-        q_terms = tokenize(query)
+        q_terms = self.query_fn(query)
         if not q_terms:
             return []
 

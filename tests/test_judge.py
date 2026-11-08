@@ -76,8 +76,15 @@ class TestThreeStates:
         assert r.verdict == "uncertain"
 
     def test_empty_corpus_query_skips_judge(self, store: MemoryStore) -> None:
+        """No retrieval means no judge call -- and no cost.
+
+        The query is a latin placeholder on purpose. Word-level indexing makes
+        "completely unrelated" hard to write in Chinese: 完全不存在的主题 still
+        contains 存在, which the corpus has. A token that cannot appear is the
+        only honest way to test the empty path.
+        """
         j = FakeJudge([True])
-        r = store.search_judged("完全不存在的主题", j)
+        r = store.search_judged("zzzqqqxxx", j)
         assert r.verdict == "not_found"
         assert j.calls == []
         assert r.checks == 0

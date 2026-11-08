@@ -23,12 +23,35 @@ from __future__ import annotations
 
 import sqlite3
 import uuid
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 
 from brain4agent.evidence import Evidence, JudgedResult, SearchResult, build_evidence
-from brain4agent.tokenize import BM25
+from brain4agent.tokenize import BM25, both_tokens, jieba_tokens, load_jieba, tokenize
+
+
+def _tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], list[str]]]:
+    """Index-side and query-side tokenisers, chosen by what is installed.
+
+    With jieba: index with bigrams *and* words, query with words. Measured at
+    hit@1 0.925 / MRR 0.940 against 0.825 / 0.891 for bigrams on both sides
+    (bench/zh/indexing_probe.py).
+
+    Without jieba: bigrams on both sides. Worse, but working -- which is the
+    whole reason jieba is an extra and not a dependency.
+    """
+    if load_jieba() is None:
+        return tokenize, tokenize
+    return both_tokens, jieba_tokens
+
+
+@lru_cache(maxsize=1)
+def _cached_tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], list[str]]]:
+    return _tokenizers()
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -36,7 +59,8 @@ CREATE TABLE IF NOT EXISTS memories (
     session_id  TEXT NOT NULL,
     role        TEXT NOT NULL,
     content     TEXT NOT NULL,
-    created_at  TEXT NOT NULL
+    created_at  TEXT NOT NULL,
+    tokens      TEXT NOT NULL DEFAULT ''
 );
 CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
@@ -78,6 +102,7 @@ class MemoryStore:
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self.path))
         self._db.executescript(SCHEMA)
+        self._migrate(self._db)
         self._db.commit()
         self._index = BM25()
         self._by_session: dict[str, list[Memory]] = {}
@@ -87,6 +112,19 @@ class MemoryStore:
         self._reload()
 
     # -- lifecycle ---------------------------------------------------------
+
+    @staticmethod
+    def _migrate(db: sqlite3.Connection) -> None:
+        """Add columns that older databases predate.
+
+        ``tokens`` caches the index-side tokenisation. Without it every rebuild
+        re-segments the whole corpus: 30 ms of jieba for a hundred-odd turns, and
+        a rebuild happens after every write. Storing the result makes rebuilding
+        a counting exercise instead.
+        """
+        cols = {row[1] for row in db.execute("PRAGMA table_info(memories)")}
+        if "tokens" not in cols:
+            db.execute("ALTER TABLE memories ADD COLUMN tokens TEXT NOT NULL DEFAULT ''")
 
     def close(self) -> None:
         self._db.close()
@@ -103,25 +141,29 @@ class MemoryStore:
         # to return it in any order. rowid is the write order, which is the order
         # the caller meant.
         rows = self._db.execute(
-            "SELECT id, session_id, role, content, created_at FROM memories ORDER BY rowid"
+            "SELECT id, session_id, role, content, created_at, tokens FROM memories ORDER BY rowid"
         ).fetchall()
         self._by_session = {}
         self._session_text = {}
         self._id_to_session = {}
-        items: list[tuple[str, str]] = []
-        for mid, sid, role, content, created in rows:
+        index_fn, query_fn = _cached_tokenizers()
+        prepared: list[tuple[str, list[str]]] = []
+
+        for mid, sid, role, content, created, tokens in rows:
             mem = Memory(id=mid, session_id=sid, role=role, content=content, created_at=created)
             self._by_session.setdefault(sid, []).append(mem)
             self._id_to_session[mid] = sid
-            items.append((mid, content))
+            # Rows written before the tokens column existed get segmented once
+            # here, then persisted on the next write of that row.
+            prepared.append((mid, tokens.split() if tokens else index_fn(content)))
 
         # One lowered block per session, joined by newline so a term cannot match
         # across two turns by accident.
         for sid, turns in self._by_session.items():
             self._session_text[sid] = "\n".join(m.content.lower() for m in turns)
 
-        self._index = BM25()
-        self._index.index(items)
+        self._index = BM25(index_fn=index_fn, query_fn=query_fn)
+        self._index.index_tokens(prepared)
         self._dirty = False
 
     def _ensure_fresh(self) -> None:
@@ -161,12 +203,14 @@ class MemoryStore:
         mid = uuid.uuid4().hex
         sid = session_id or self.new_session()
         ts = timestamp or _now()
+        index_fn, _ = _cached_tokenizers()
+        tokens = " ".join(index_fn(text))
 
         with self._db:
             self._db.execute(
-                "INSERT INTO memories (id, session_id, role, content, created_at)"
-                " VALUES (?, ?, ?, ?, ?)",
-                (mid, sid, role, text, ts),
+                "INSERT INTO memories (id, session_id, role, content, created_at, tokens)"
+                " VALUES (?, ?, ?, ?, ?, ?)",
+                (mid, sid, role, text, ts, tokens),
             )
 
         mem = Memory(id=mid, session_id=sid, role=role, content=text, created_at=ts)

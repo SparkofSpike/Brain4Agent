@@ -14,6 +14,7 @@ import pytest
 
 from brain4agent import BM25, MemoryStore, describe, tokenize, word_tokens
 from brain4agent.evidence import question_terms
+from brain4agent.tokenize import both_tokens, jieba_tokens
 
 
 @pytest.fixture()
@@ -194,6 +195,31 @@ class TestBM25:
         idx = BM25()
         idx.index([(str(i), "cat") for i in range(10)])
         assert len(idx.search("cat", top_k=3)) == 3
+
+    def test_separate_index_and_query_tokenisers(self) -> None:
+        """The measured shape: wide on the writing side, precise on the asking side."""
+        idx = BM25(index_fn=both_tokens, query_fn=jieba_tokens)
+        idx.index([("a", "中文查询搜不到记忆"), ("b", "完全无关的天气情况")])
+        hits = idx.search("中文查询")
+        assert hits
+        assert hits[0][0] == "a"
+
+    def test_defaults_use_bigrams_both_sides(self) -> None:
+        """Without explicit tokenisers, behaviour is the documented fallback."""
+        idx = BM25()
+        assert idx.index_fn is tokenize
+        assert idx.query_fn is tokenize
+
+    def test_ties_break_on_insertion_order(self) -> None:
+        """Identical documents must not swap places run to run.
+
+        The bug this guards: uuid ids made an entity-swapped hard negative win
+        half the time, so the same query returned a different top answer.
+        """
+        idx = BM25()
+        idx.index([("zzz", "相同 相同"), ("aaa", "相同 相同")])
+        first = [i for i, _ in idx.search("相同")]
+        assert first == ["zzz", "aaa"], "insertion order must win, not id order"
 
 
 class TestDescribe:
