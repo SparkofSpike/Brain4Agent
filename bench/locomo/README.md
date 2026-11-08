@@ -101,3 +101,29 @@ here under the same terms so the run is self-contained. If the upstream snapshot
 is ever corrected, this copy has to be replaced and the numbers re-measured —
 that is the cost of shipping data instead of downloading it, and the trade is
 worth it for a benchmark whose whole purpose is being checkable.
+## On answer accuracy: probed, not measured
+
+Five questions were run through the read stage (`b4a_ask`) to see whether an
+answer-accuracy number was worth producing. It is not, yet — for two reasons
+worth recording rather than hiding.
+
+**Temporal questions need dates the read stage does not pass.** Asked "when did
+Caroline go to the LGBTQ support group", the reader answered "yesterday" — which
+is what the transcript says, and is exactly right *relative to the conversation
+date*. The gold is "7 May 2023". LoCoMo ships `query_timestamp` in every
+question's metadata precisely because resolving "yesterday" requires knowing when
+the question was asked. A reader that ignores that metadata fails every temporal
+question for reasons having nothing to do with retrieval.
+
+**Three of five calls returned nothing.** Not a wrong answer — no answer. That is
+a transport or rate-limit failure surfacing as `None`, which means an accuracy
+number from this path would measure API reliability as much as memory quality.
+
+Both are fixable. Neither is fixed, so no number is published. `hit@5 = 0.8850`
+remains the honest bound: retrieval finds the answer's session 88.5% of the time,
+and what a reader does with it is unmeasured.
+
+Running this properly would need session dates in the evidence block,
+`query_timestamp` in the prompt, retry with backoff around the model call, and a
+judge whose prompt is published. That is a separate piece of work. Doing it badly
+would produce a number that looks comparable to Mem0's 0.669 and is not.
