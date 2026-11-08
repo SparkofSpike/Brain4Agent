@@ -26,8 +26,15 @@ multi-hop     0.4045
 **These are retrieval numbers, not answer accuracy.** Published LoCoMo scores
 (0.67–0.92) measure whether a generated answer matches the gold answer under an
 LLM judge. A retrieval number can only bound that: with `hit@5 = 0.8850`, the
-best possible answer accuracy at five retrieved sessions is 88.5%, and a real
-system scoring well below that means the loss is in reading, not in finding.
+best possible answer accuracy **for a reader that sees exactly five sessions and
+cannot reason across them** is 88.5%.
+
+That condition matters and this file originally omitted it. Allow ten sessions
+and the bound is this store's own `hit@10 = 0.9471`; allow a reader to reason
+between sessions — which AMB's own prompt instructs it to do — and there is no
+single-retrieval bound at all. It is a statement about one configuration, not
+about the field, and it is not evidence that any other system's retrieval is
+worse.
 
 Anyone comparing 0.6270 against Mem0's 0.669 or Letta's 0.740 is comparing two
 different measurements. The README says so here so that nobody has to discover it

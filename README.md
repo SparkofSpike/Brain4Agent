@@ -345,10 +345,16 @@ MRR     0.7369
 `python -m bench.locomo.run` — no model, data committed.
 
 **Not comparable to published LoCoMo numbers.** Those (0.67–0.92) measure answer
-accuracy under an LLM judge; these measure whether the right session was
-retrieved. `hit@5 = 0.8850` bounds what a reader could achieve — and MemMachine
-(0.9169) and Honcho (0.8990) exceed that bound, which means their retrieval is
-better than this one, not that their answers are.
+accuracy under an LLM judge with its own backbone and prompt; these measure
+whether the right session was retrieved.
+
+A caution about the tempting inference, because this README made it and was
+wrong. `hit@5 = 0.8850` is **not** a ceiling on anyone's answer accuracy — only on
+a reader that sees exactly five sessions and is forbidden to reason beyond them.
+This store's own `hit@10 = 0.9471` already exceeds MemMachine's 0.9169, which is
+the same store, so the bound says nothing about a different system's retrieval.
+Published LoCoMo numbers are not evidence about retrieval quality in either
+direction.
 
 The design lesson here: retrieval unit must match the answer's unit. Indexing
 turns instead of sessions costs 8.2 points of hit@1 (0.5447 → 0.6270) with no

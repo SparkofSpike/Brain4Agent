@@ -2,8 +2,8 @@
 
     python -m bench.pmb.run
 
-The published baseline to beat is 0.4675 (open-knowledge-format), the highest of
-the eight systems currently recorded in AMB's external_results.json. zep is
+The published baseline to beat is 0.4675 (open-knowledge-format), the highest
+recorded in AMB's external_results.json (11 entries as of this writing). zep is
 0.1169, supermemory 0.2727, gbrain 0.4416.
 
 Two numbers matter and they are not the same:
