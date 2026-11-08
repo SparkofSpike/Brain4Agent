@@ -108,6 +108,15 @@ class TestTools:
         assert payload["found"] is False
         assert out["result"]["isError"] is False
 
+    def test_recall_miss_reports_corpus_missing(self, server: Server) -> None:
+        """found=false still carries the words nobody ever wrote down."""
+        call(server, "b4a_remember", {"content": "杭州测试机的地址"})
+        out = call(server, "b4a_recall", {"query": "zzzqqqxxx"})
+        payload = json.loads(text_of(out))
+        assert payload["found"] is False
+        assert payload["corpus_missing"] == ["zzzqqqxxx"]
+        assert "zzzqqqxxx" in payload["note"]
+
     def test_recall_empty_query(self, server: Server) -> None:
         out = call(server, "b4a_recall", {"query": ""})
         assert out["result"]["isError"] is True

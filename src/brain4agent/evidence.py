@@ -287,7 +287,10 @@ def build_evidence(
 def describe(result: SearchResult) -> str:
     """Human-readable summary of a search."""
     if result.empty:
-        return f"no evidence for {result.query!r}"
+        line = f"no evidence for {result.query!r}"
+        if result.corpus_missing:
+            line += f"\n  corpus has no: {', '.join(result.corpus_missing)}"
+        return line
     lines = [f"{len(result.evidence)} sessions for {result.query!r}"]
     if result.corpus_missing:
         lines.append(f"  corpus has no: {', '.join(result.corpus_missing)}")

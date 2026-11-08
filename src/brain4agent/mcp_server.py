@@ -187,7 +187,13 @@ class Server:
                         "found": False,
                         "query": query,
                         "sessions_searched": result.sessions_searched,
-                        "note": "no session shares any term with the query",
+                        "corpus_missing": result.corpus_missing,
+                        "note": (
+                            "no session shares any term with the query"
+                            if not result.corpus_missing
+                            else "the corpus has never contained: "
+                            + ", ".join(result.corpus_missing)
+                        ),
                     },
                     ensure_ascii=False,
                 )

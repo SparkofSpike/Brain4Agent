@@ -65,6 +65,9 @@ def cmd_search(args: argparse.Namespace) -> int:
         if result.empty:
             print(f"no evidence for {args.query!r}")
             print(f"({result.sessions_searched} sessions searched)")
+            if result.corpus_missing:
+                # The strongest thing an empty result can say.
+                print(f"corpus has no: {', '.join(result.corpus_missing)}")
             return 1
 
         print(describe(result))

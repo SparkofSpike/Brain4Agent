@@ -285,8 +285,16 @@ class TestBM25:
 
 class TestDescribe:
     def test_empty(self, store: MemoryStore) -> None:
-        r = store.search("不存在的内容")
+        r = store.search("zzzqqqxxx")
         assert "no evidence" in describe(r)
+
+    def test_empty_still_reports_corpus_missing(self, store: MemoryStore) -> None:
+        """An empty result's most useful line is which words the corpus lacks."""
+        store.add("杭州测试机的地址", session_id="s1")
+        text = describe(store.search("zzzqqqxxx"))
+        assert "no evidence" in text
+        assert "corpus has no" in text
+        assert "zzzqqqxxx" in text
 
     def test_shows_corpus_missing(self, store: MemoryStore) -> None:
         store.add("杭州测试机的地址", session_id="s1")

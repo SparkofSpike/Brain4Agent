@@ -39,6 +39,19 @@ def test_search_miss_returns_one(db: Path, capsys: pytest.CaptureFixture[str]) -
     assert "no evidence" in out
 
 
+def test_search_miss_shows_corpus_missing(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A miss must still say which words the corpus has never contained."""
+    main(["--db", str(db), "add", "杭州测试机的地址"])
+    capsys.readouterr()
+
+    code = main(["--db", str(db), "search", "zzzqqqxxx"])
+    out = capsys.readouterr().out
+    assert code == 1
+    assert "no evidence" in out
+    assert "corpus has no" in out
+    assert "zzzqqqxxx" in out
+
+
 def test_search_shows_missing_terms(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     main(["--db", str(db), "add", "杭州测试机的地址是 203.0.113.42"])
     capsys.readouterr()
