@@ -1,6 +1,6 @@
 # Brain4Agent
 
-Long-term memory for agents. Chinese-first retrieval, no model in the core path,
+Long-term memory for agents. CJK-first retrieval, no model in the core path,
 and evidence instead of confidence scores.
 
 `pip install -e ".[precise]"` requires Python 3.11+ and one optional dictionary.
@@ -32,8 +32,12 @@ conversation it came from, and re-deriving it is expensive.
 Brain4Agent stores those turns in a single SQLite file and retrieves them by
 session. It is designed around four constraints:
 
-- **Chinese works out of the box.** Segmenting Han text with a whitespace or
-  non-word boundary collapses a query to one token. Character bigrams do not.
+- **CJK works out of the box.** Segmenting Han, kana or Hangul with a whitespace
+  or non-word boundary collapses a query to one token, and halfwidth katakana
+  matches neither a CJK range nor an ASCII word class. Character bigrams fail
+  in none of those ways. The measured numbers are Chinese (see Benchmarks);
+  Japanese, Korean and Vietnamese are supported and tested but not benchmarked,
+  and the README does not pretend otherwise.
 - **The core makes no model calls.** Retrieval is BM25. No API key, no
   accelerator, no cold start, single-digit milliseconds per query.
 - **It reports evidence, not verdicts.** Instead of a confidence score, a search
@@ -60,7 +64,7 @@ pip install -e .              # zero dependencies: falls back to bigrams, hit@1 
 bigrams on both sides of retrieval and keeps working.
 
 **Windows, non-ASCII input.** The MCP server and the CLI pin their stdin/stdout
-to UTF-8, so Chinese content works regardless of the console code page. Command
+to UTF-8, so CJK content works regardless of the console code page. Command
 line *arguments* are decoded by Python before any of that runs, though — if you
 pass non-ASCII text as an argument, set `PYTHONUTF8=1`.
 
