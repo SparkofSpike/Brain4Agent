@@ -1828,3 +1828,78 @@ of memories surface the right one under real questions — is untouched.
 **Action taken.** None in the store. The dsh config change lives outside the
 repo; a copy is kept in this entry so it can be reconstructed. `cordis.patch.yml`
 was backed up before editing and the temporary store was deleted afterwards.
+---
+
+## D-033 Real scale: 2893 memories, and the queries that worked
+
+**Context.** Every previous test used five memories I wrote minutes earlier. The
+user's instruction was direct: copy the nmem brain over and let the agent search
+it with `b4a`.
+
+**Setup.** `bench/nmem/import_to_b4a.py` reads the nmem database read-only, takes
+each fiber's summary or essence as one memory, skips mojibake rows, and imports.
+
+```
+fibers:   2928
+usable:   2893   (34 empty, 1 mojibake)
+import:   8.9 s
+store:    3.0 MB, 22799 index terms
+```
+
+The dsh profile points at the imported store; the question is asked in Chinese and
+the agent is told to answer only from memory.
+
+**Result, negative case.** *"How was the Oracle escaping issue solved?"*
+
+> 没有。记忆库里查不到 Oracle 数据库转义问题的记录。
+>
+> 依据是检索给出的「整份语料缺失」信号，而不是单条会话不匹配：`corpus_missing`
+> 直接列出了 `oracle`，说明整个记忆库中从未出现过这个词。
+
+It then listed the three nearest sessions and named why each was not it (FTS
+index corruption, a schema mismatch, a PowerShell escaping bug). **That is the
+distinction `corpus_missing` exists to make**, used correctly and without
+prompting: "not this session" versus "never recorded".
+
+**Result, positive case.** *"What went wrong with PowerShell writing Chinese
+files, and how was it solved?"*
+
+It returned six memories across three categories — silent corruption on rewrite,
+BOM injection by `Set-Content`/`Out-File`/`*>`, and the reverse failure of reading
+UTF-8 as GBK — each with a session id, one of them noticing the source text is
+itself truncated mid-sentence.
+
+Then the part that matters more:
+
+> 记忆里**没有**完整的替代写法记录：我特意查了 `WriteAllText`、`UTF8Encoding`
+> 这两个词，返回的 `corpus_missing` 里就是它们。所以"用
+> `[System.IO.File]::WriteAllText(...)` 写无 BOM"这种做法，b4a 里查不到，
+> **不能算记忆内容**。
+
+It checked whether the correct answer was in memory, found it was not, and
+declined to supply it from its own knowledge — while stating what the correct
+answer likely is. That is exactly the boundary this project is built around, and
+the agent drew it without being told to.
+
+**What this establishes.**
+
+1. **2893 memories at 3 MB, 22.8k terms, 8.9 s import, 17–34 s per question**
+   end-to-end including multiple retrievals and reading. That is a real if small
+   corpus, and the store handled it without tuning.
+2. **Retrieval is accurate enough to be useful on this corpus.** Six relevant
+   memories surfaced from 2893 for a topic that occupied maybe 0.2% of it.
+3. **The absence signal survived scale.** `oracle` returned zero across 2893
+   sessions, and the agent read that as a hard fact rather than a failed search.
+
+**What this does not establish.** The corpus is one user's notes, and the two
+questions were chosen after seeing what was in it — which is a form of leakage:
+I knew the PowerShell memories existed before asking about them. A blind set of
+questions, or a corpus where the answer is genuinely unknown to the asker, would
+be a stronger test. It also says nothing about latency under a thousand
+concurrent queries, or about a corpus an order of magnitude larger.
+
+**Incidental finding.** `is_mojibake` caught 1 row here against 34 in the pruning
+probe. The earlier count came from a smaller sample with a different filter path;
+neither number is authoritative. The detector matches common GBK-misread Han
+characters and is a heuristic, not a validator — worth remembering before quoting
+a "34 mojibake rows" figure again.
