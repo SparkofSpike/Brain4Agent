@@ -227,12 +227,19 @@ class TestSupersessionRedirect:
         store.supersede(b, c)
         assert [e.memory.content for e in store.search("MySQL").evidence] == ["v2 用 SQLite"]
 
-    def test_include_superseded_does_not_redirect(self, store: MemoryStore) -> None:
+    def test_include_superseded_shows_both(self, store: MemoryStore) -> None:
+        """With history on, the old memory is a hit in its own right.
+
+        It is no longer the *only* hit: the replacement inherited its index terms
+        (see the supersede() comment), so "主库" matches both. That is correct --
+        the old one matched on its own text, the new one on what it inherited.
+        """
         old = store.add("主库是 MySQL", session_id="jan")
         new = store.add("迁到 PostgreSQL", session_id="mar")
         store.supersede(old, new)
-        hits = store.search("主库", include_superseded=True)
-        assert [e.memory.content for e in hits.evidence] == ["主库是 MySQL"]
+        got = [e.memory.content for e in store.search("主库", include_superseded=True).evidence]
+        assert "主库是 MySQL" in got
+        assert "迁到 PostgreSQL" in got
 
     def test_two_olds_pointing_at_one_new_are_deduped(self, store: MemoryStore) -> None:
         a = store.add("缓存用 Redis", session_id="a")

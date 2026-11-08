@@ -824,6 +824,27 @@ class MemoryStore:
             return False
         if old_id == new_id:
             raise ValueError("a memory cannot supersede itself")
+
+        # The replacement inherits the old memory's index terms. Redirecting a hit
+        # (D-027) recovers the session but leaves coverage near zero, because the
+        # new text genuinely lacks the old question's words -- "main store is
+        # MySQL" replaced by "migrated to PostgreSQL" still does not contain
+        # "main store". Copying the terms fixes the match, not just the routing.
+        #
+        # Terms, not content: the old row's token column already carries anything
+        # it inherited, so a chain A -> B -> C passes A's vocabulary through C
+        # without re-segmenting the whole history each time.
+        row = self._db.execute("SELECT tokens FROM memories WHERE id = ?", (old_id,)).fetchone()
+        inherited = (row[0] if row else "").split()
+        if inherited:
+            cur = self._db.execute("SELECT tokens FROM memories WHERE id = ?", (new_id,)).fetchone()
+            existing = (cur[0] if cur else "").split()
+            # dict.fromkeys keeps first-seen order and drops duplicates, so the
+            # inherited terms do not multiply the row's length on repeated links.
+            merged = " ".join(dict.fromkeys([*existing, *inherited]))
+            with self._db:
+                self._db.execute("UPDATE memories SET tokens = ? WHERE id = ?", (merged, new_id))
+
         with self._db:
             self._db.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (new_id, old_id))
         self._dirty = True
