@@ -103,7 +103,7 @@ def abstention_report(data: dict, store: MemoryStore) -> dict:
 BASELINE = {"hit@1": 0.825, "hit@5": 0.950, "hit@10": 1.000, "mrr": 0.8911}
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true", help="machine-readable output")
     ap.add_argument(
@@ -112,7 +112,7 @@ def main() -> int:
         default=0.0,
         help="exit non-zero if hit@1 falls below this (use in CI)",
     )
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
 
     data = load()
     store = build_store(data)
@@ -124,7 +124,7 @@ def main() -> int:
         print(
             json.dumps({**result, "abstention": abst, "store": stats}, ensure_ascii=False, indent=2)
         )
-        return 0
+        return 0 if result["hit@1"] >= args.min_hit1 else 1
 
     print(f"corpus: {stats['sessions']} sessions / {stats['turns']} turns")
     print(f"answerable: {result['n']} questions")
