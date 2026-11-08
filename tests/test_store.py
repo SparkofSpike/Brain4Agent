@@ -134,7 +134,22 @@ class TestStoreBasics:
             with MemoryStore(db) as s2:
                 assert s2.stats()["sessions"] == 1
 
+    def test_long_memory_is_retrievable_by_word(self, store: MemoryStore) -> None:
+        """Chunking must keep word tokens, not degrade long text to bigrams.
+
+        The earlier length cap made a 12k-character memory containing 数据库 a
+        thousand times unfindable by searching 数据库, with corpus_missing empty
+        because the raw text does contain it -- a stored memory that cannot be
+        recalled and reports no reason.
+        """
+        text = "数据库相关的说明文字。" * 1000  # 11,000 chars
+        store.add(text, session_id="long")
+
+        assert store.search("数据库").best().session_id == "long"
+        assert store.search("说明文字").best().session_id == "long"
+
     def test_content_length_is_capped(self, store: MemoryStore) -> None:
+
         """A conversation turn is not a document; fail loudly rather than slowly."""
         with pytest.raises(ValueError, match="too long"):
             store.add("中" * 100_001, session_id="big")

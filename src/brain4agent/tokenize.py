@@ -122,12 +122,21 @@ def jieba_tokens(text: str) -> list[str]:
     return [w.strip().lower() for w in jieba.lcut(text) if w.strip()]
 
 
-# jieba degrades super-linearly on long unpunctuated runs. Measured on this
-# machine: 10k identical characters took 585 ms, 20k took 2.4 s, 100k took 85 s,
-# while 50k characters of natural text takes 600 ms. A memory that hangs the
-# caller is worse than a memory indexed coarsely, so past this length the index
-# side falls back to bigrams alone -- linear, and still able to match anything.
-JIEBA_MAX_CHARS = 10_000
+# jieba degrades super-linearly on one long unpunctuated run. Measured: 10k
+# identical characters 585 ms, 20k 2.4 s, 100k 85 s, while 50k characters of
+# natural text takes 600 ms.
+#
+# The first attempt at this capped the length and fell back to bigrams past the
+# cap. That was worse than the slowness: the index then held no words for long
+# memories while queries still used words, so a 12k-character memory containing
+# 数据库 a thousand times could not be found by searching 数据库 -- and
+# corpus_missing was empty, because the raw text does contain it. A stored
+# memory that cannot be recalled and reports no reason is the exact failure this
+# project exists to prevent.
+#
+# Chunking keeps the words and fixes the cost: 100k characters in 2k chunks
+# indexes in ~0.4 s (repetitive) to ~1.1 s (natural), against 85 s unchunked.
+JIEBA_CHUNK_CHARS = 2_000
 
 
 def both_tokens(text: str) -> list[str]:
@@ -142,9 +151,15 @@ def both_tokens(text: str) -> list[str]:
     is a bias in favour of terms both tokenisers agree on, which is not the same
     as a bug, and the measured result already includes it.
     """
-    if len(text) > JIEBA_MAX_CHARS:
-        return tokenize(text)
-    return tokenize(text) + jieba_tokens(text)
+    out = tokenize(text)
+    if len(text) <= JIEBA_CHUNK_CHARS:
+        out.extend(jieba_tokens(text))
+        return out
+    # Segment in chunks: words survive, so a query for a 3+ character term still
+    # matches, and the super-linear cost stays on short runs where it belongs.
+    for i in range(0, len(text), JIEBA_CHUNK_CHARS):
+        out.extend(jieba_tokens(text[i : i + JIEBA_CHUNK_CHARS]))
+    return out
 
 
 class BM25:
