@@ -118,6 +118,9 @@ of newline-delimited JSON-RPC. The official SDK pulls in a large dependency tree
 to serialise four dictionaries; see
 [D-017](docs/decisions.md#d-017-mcp-implemented-against-the-protocol-not-the-sdk).
 
+If editing MCP config is inconvenient, the same library is also packaged as an
+agent [skill](integrations/) — a document the agent reads, then calls the CLI.
+
 ### Library
 
 ```python
