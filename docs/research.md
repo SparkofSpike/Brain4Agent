@@ -1,119 +1,147 @@
-# 论文调研
+# Literature Review
 
-调研日期：2026-11-06
-方法：每篇都实际抓取 arXiv abs 页面，读取标题、作者、投稿日期、摘要原文。
-逐篇核实记录见 `/var/lib/b4a\research\agent-memory-papers-2026-11.md`。
+Surveyed 2026-11-06. Every entry was checked by fetching the arXiv abstract page
+and reading the title, authors, submission date, and abstract text — nothing
+here is cited from memory.
 
 ---
 
-## 综述
+## Surveys
 
 **arXiv:2504.15965** — *From Human Memory to AI Memory: A Survey on Memory
-Mechanisms in the Era of LLMs*（Yaxiong Wu 等 8 人，2025-04-22，cs.IR，26 页）
+Mechanisms in the Era of LLMs* (Yaxiong Wu et al., 8 authors, 2025-04-22, cs.IR,
+26 pages)
 
-提出 object / form / time 三维度 + 八象限的记忆分类法，并系统对照人类记忆类别。
-摘要指出：现有综述缺少「LLM 驱动的 AI 系统记忆与人类记忆之间关系」的系统分析。
+Proposes a three-axis taxonomy — object, form, time — yielding eight quadrants,
+and maps them against categories of human memory. Notes that prior surveys lack a
+systematic treatment of the relationship between LLM-driven memory and human
+memory.
 
-**用途**：八象限可作模块划分依据。
+*Relevance:* the eight quadrants are a usable basis for module boundaries.
 
 **arXiv:2404.13501** — *A Survey on the Memory Mechanism of Large Language Model
-based Agents*（Zeyu Zhang 等 9 人，2024-04-21，cs.AI，39 页）
+based Agents* (Zeyu Zhang et al., 9 authors, 2024-04-21, cs.AI, 39 pages)
 
-覆盖「是什么 / 为什么 / 怎么设计与评测 / 应用 / 局限与方向」。摘要明确点出现有工作
-分散、缺整体视角、没能抽象出可复用设计模式。
+Covers what memory is, why it is needed, how to design and evaluate it,
+applications, and open problems. States plainly that existing work is scattered,
+lacks a holistic view, and has not abstracted reusable design patterns.
 
-**用途**：「设计与评测」两节最能省重复劳动。
+*Relevance:* the design and evaluation sections remove the most duplicated work.
 
 ---
 
-## 评测基准 ← 本项目 Stage 0 的基础
+## Benchmarks — the basis for Stage 0
 
 **arXiv:2410.10813** — *LongMemEval: Benchmarking Chat Assistants on Long-Term
-Interactive Memory*（Di Wu 等 6 人，2024-10-14 / v2 2025-03-04，**ICLR 2025**）
+Interactive Memory* (Di Wu et al., 6 authors, 2024-10-14, v2 2025-03-04,
+**ICLR 2025**)
 
-五项核心能力（摘要原文）：
-information extraction / multi-session reasoning / temporal reasoning /
-knowledge updates / **abstention**
+Five core abilities, from the abstract: information extraction, multi-session
+reasoning, temporal reasoning, knowledge updates, and **abstention**.
 
-500 道题，嵌入可自由扩展的对话历史。实测商业助手和长上下文 LLM 在持续交互中
-**掉 30% 准确率**。
+500 questions embedded in extensible conversation histories. Commercial
+assistants and long-context LLMs lose **30% accuracy** under sustained
+interaction.
 
-三阶段框架：`indexing → retrieval → reading`。
-三个优化：session decomposition for value granularity；
-fact-augmented key expansion for indexing；time-aware query expansion。
+Three-stage framework: `indexing → retrieval → reading`. Three optimisations:
+session decomposition for value granularity, fact-augmented key expansion for
+indexing, time-aware query expansion.
 
-**本项目实测的两条（见 decisions.md D-007 / D-008）**
-- 检索不是瓶颈（BM25 零依赖 hit@10 = 96.6%）
-- 分数不能当拒答信号（最佳平衡 0.688，代价是丢 46% 正常查询）
+*Measured in this project (D-007, D-008):*
+
+- Retrieval is not the bottleneck — BM25 with zero dependencies reaches 96.6%
+  hit@10.
+- Scores cannot implement abstention — best balanced threshold 0.688, at the cost
+  of discarding 46% of normal queries.
 
 **arXiv:2402.17753** — *Evaluating Very Long-Term Conversational Memory of LLM
-Agents*（LoCoMo，Adyasha Maharana 等 6 人，2024-02-27，cs.CL）
+Agents* (LoCoMo, Adyasha Maharana et al., 6 authors, 2024-02-27, cs.CL)
 
-35 会话 / 平均 300 轮 / 9K tokens，含图像分享。评测 QA、事件摘要、多模态生成。
-结论：LLM 长程时序与因果理解仍困难；长上下文与 RAG 有改善但明显落后人类。
+35 sessions, averaging 300 turns and 9K tokens, including shared images.
+Evaluates question answering, event summarisation, and multimodal generation.
+Finds long-range temporal and causal understanding still difficult; long context
+and RAG help but remain far behind human performance.
 
-**用途**：偏对话。做 coding agent 记忆时 LongMemEval 更贴。
+*Relevance:* conversation-oriented. LongMemEval fits a coding agent's memory
+better.
 
 ---
 
-## 架构参考
+## Architecture references
 
 **arXiv:2405.14831** — *HippoRAG: Neurobiologically Inspired Long-Term Memory for
-LLMs*（Bernal Jiménez Gutiérrez 等 5 人，2024-05-23 / v3 2025-01-14，**NeurIPS 2024**）
+LLMs* (Bernal Jiménez Gutiérrez et al., 5 authors, 2024-05-23, v3 2025-01-14,
+**NeurIPS 2024**)
 
-依据海马体索引理论，LLM + 知识图谱 + **Personalized PageRank**，模拟新皮层与
-海马体分工。多跳 QA 比 SOTA 提升 **20%**；单步检索达到或超过 IRCoT，
-但**便宜 10–30 倍、快 6–13 倍**。
+Based on hippocampal indexing theory: LLM plus a knowledge graph plus
+**Personalized PageRank**, modelling the division of labour between neocortex and
+hippocampus. Improves multi-hop QA by **20%** over prior state of the art;
+single-step retrieval matches or beats IRCoT while being **10–30× cheaper and
+6–13× faster**.
 
-**注意**：neural-memory 有 `engine/ppr_activation.py` 实现过 PPR，但那个库
-34048 条突触里 79% 神经元是 `4G`/`5h` 这类碎片。算法对，图脏。
-**这是「控制图质量」这条设计理由的来源。**
+*Note:* a previously examined library implemented PPR in
+`engine/ppr_activation.py`, but 79% of the nodes in its 34,048-edge graph were
+fragments like `4G` and `5h` extracted from prose. The algorithm was right; the
+graph was not. This is the origin of the "graph quality beats graph algorithm"
+rationale.
 
-**arXiv:2502.12110** — *A-MEM: Agentic Memory for LLM Agents*（Wujiang Xu 等 6 人，
-2025-02-17 / **v11 2025-10-08**）
+**arXiv:2502.12110** — *A-MEM: Agentic Memory for LLM Agents* (Wujiang Xu et al.,
+6 authors, 2025-02-17, v11 2025-10-08)
 
-基于 Zettelkasten：新记忆写入时生成结构化笔记（上下文描述、关键词、标签），
-分析历史记忆建立链接。核心机制 **memory evolution**——新记忆会触发对**旧记忆**
-的上下文表示和属性更新。六个基础模型上优于 SOTA。
+Built on Zettelkasten. Each new memory becomes a structured note — contextual
+description, keywords, tags — and is linked against existing memories. The core
+mechanism, **memory evolution**, lets a new memory update the contextual
+representation and attributes of *older* memories. Outperforms prior state of the
+art across six base models.
 
-**注意**：改写旧记忆意味着可追溯性下降，需要保留版本。本项目暂不采用。
+*Note:* rewriting old memories reduces traceability and requires versioning. Not
+adopted here.
 
 **arXiv:2305.10250** — *MemoryBank: Enhancing Large Language Models with Long-Term
-Memory*（Wanjun Zhong 等 5 人，2023-05-17，10 页）
+Memory* (Wanjun Zhong et al., 5 authors, 2023-05-17, 10 pages)
 
-受艾宾浩斯遗忘曲线启发，依据**经过时间**与**相对重要性**决定遗忘与强化。
+Inspired by the Ebbinghaus forgetting curve: forgetting and reinforcement are
+driven by **elapsed time** and **relative importance**.
 
-**用途**：只增不减的记忆库检索质量会单调下降。遗忘是可计算的功能，不是 bug。
+*Relevance:* a memory store that only grows degrades monotonically in retrieval
+quality. Forgetting is a computable feature, not a bug.
 
-**arXiv:2304.03442** — *Generative Agents: Interactive Simulacra of Human Behavior*
-（Joon Sung Park 等 6 人，2023-04-07 / v2 2023-08-03，cs.HC）
+**arXiv:2304.03442** — *Generative Agents: Interactive Simulacra of Human
+Behavior* (Joon Sung Park et al., 6 authors, 2023-04-07, v2 2023-08-03, cs.HC)
 
-memory stream（完整经历）+ reflection（随时间综合成更高层反思）+ 动态检索规划。
-消融证明三者各自都有实质贡献。
+Memory stream (complete experience) plus reflection (periodic synthesis into
+higher-level observations) plus retrieval-driven planning. Ablations show each
+contributes materially.
 
-**用途**：`reflection` 是缺失的一环——存「做了什么」和存「学到什么」是两件事。
+*Relevance:* reflection is the missing layer — storing *what happened* and storing
+*what was learned* are two different things.
 
 ---
 
-## 未逐篇核实的候选
+## Candidates not individually verified
 
-下列出现在搜索结果中，但**没有打开 arXiv 页面验证**，引用前必须补验：
+These appeared in search results but their arXiv pages were **not opened**.
+Verify before citing:
 
 - 2404.16130 — GraphRAG
 - 2410.05779 — LightRAG
 - 2504.13171 — Sleep-time Compute
 - 2409.01317 — Language Models Need Sleep
-- 2408.08921 / 2501.00309 / 2402.07630 — graph RAG 相关
+- 2408.08921 / 2501.00309 / 2402.07630 — graph RAG variants
 
 ---
 
-## 跨论文的结论
+## Conclusions across the literature
 
-1. **写入与查询必须分离**（LongMemEval 三阶段）。写入要覆盖全，查询要精准，
-   共用一套键生成必然顾此失彼。
-2. **拒答是一等能力，不是错误处理**（LongMemEval 第五项）。且本项目实测证明
-   它不能用分数阈值实现。
-3. **图的质量比图算法重要**（HippoRAG + 我们对 neural-memory 的实测）。
-4. **遗忘是功能**（MemoryBank）。
-5. **反思层是缺失的一环**（Generative Agents）。
-6. **中文是空白**：8 篇论文零篇处理 CJK，评测集全英文。
+1. **Indexing and querying must be separated** (LongMemEval's three stages).
+   Writing wants broad coverage, querying wants precision, and one shared
+   tokeniser necessarily loses on one side. Measured in D-019.
+2. **Abstention is a first-class capability, not error handling** (LongMemEval's
+   fifth ability). This project measured that score thresholds cannot implement
+   it (D-008) and that corpus-absence evidence gets partway (D-018).
+3. **Graph quality beats graph algorithms** (HippoRAG, plus the PPR observation
+   above).
+4. **Forgetting is a feature** (MemoryBank).
+5. **A reflection layer is missing from most designs** (Generative Agents).
+6. **Chinese is unaddressed.** None of the eight papers handle CJK; every
+   benchmark is English.
