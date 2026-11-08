@@ -1927,12 +1927,20 @@ down -- the server was selected correctly and read the wrong file.
 `BRAIN4AGENT_DB` points at it. `b4a-nmem.db` stays untouched as the experiment
 corpus for `bench/nmem/` and as a rollback point.
 
-**Migration policy.** New memories go to b4a only. nmem stays read-only for
-anything written before 2026-11-08. Its 2893 fibers are already in b4a, so in
-practice there is nothing left to read from nmem; it is kept for a month as a
-rollback path and then removed. Where b4a lacks a capability -- cross-session
-aggregation, recap-style summaries -- the answer is that it lacks it, not that
-nmem should be used to cover the gap.
+**Migration policy.** nmem is deprecated. Its 2893 usable fibers are imported
+into b4a, and `neural-memory` is set to `disabled: true` in `mcp.json` so it is
+no longer loaded into a session at all. The earlier wording here described it as
+read-only history kept for a month as a rollback path; that was superseded.
+
+Why disable rather than keep alongside: D-031 measured what two memory servers
+do to tool selection, and this entry measured what one misconfigured server does
+to answers. A memory source that is stale, complete in b4a, and still loadable
+adds no capability and one more way to be wrong. Where b4a lacks something --
+cross-session aggregation, recap-style summaries -- the answer is that it lacks
+it, not that nmem should cover the gap.
+
+`b4a-nmem.db` stays on disk as the corpus for `bench/nmem/` and as a rollback
+artifact. It is not a runtime dependency and no code path reads it.
 
 **Verified.** `b4a search` for a known ProjectX_3.0 memory returns 3 sessions from the
 main store; the MCP handshake reports `db=/var/lib/b4a\tmp\b4a.db` and lists
