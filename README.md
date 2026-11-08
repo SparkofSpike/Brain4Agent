@@ -45,6 +45,11 @@ pip install -e .              # zero dependencies: falls back to bigrams, hit@1 
 `jieba` is a ~20 MB static dictionary. It is not required — the code degrades to
 bigrams on both sides of retrieval and keeps working.
 
+**Windows, non-ASCII input.** The MCP server and the CLI pin their stdin/stdout
+to UTF-8, so Chinese content works regardless of the console code page. Command
+line *arguments* are decoded by Python before any of that runs, though — if you
+pass non-ASCII text as an argument, set `PYTHONUTF8=1`.
+
 ## Quick start
 
 ### CLI
