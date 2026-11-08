@@ -15,6 +15,7 @@ Without it, everything still works.
 - [Quick start](#quick-start)
 - [How it works](#how-it-works)
 - [Benchmarks](#benchmarks)
+- [Against the frontier](#against-the-frontier)
 - [Status](#status)
 - [Design decisions](#design-decisions)
 
@@ -25,7 +26,7 @@ which approach failed, where a deployment lives. That context outlives the
 conversation it came from, and re-deriving it is expensive.
 
 Brain4Agent stores those turns in a single SQLite file and retrieves them by
-session. It is designed around three constraints:
+session. It is designed around four constraints:
 
 - **Chinese works out of the box.** Segmenting Han text with a whitespace or
   non-word boundary collapses a query to one token. Character bigrams do not.
@@ -34,6 +35,15 @@ session. It is designed around three constraints:
 - **It reports evidence, not verdicts.** Instead of a confidence score, a search
   returns which words in the question the corpus never contained. Deciding what
   that means is left to the caller, which already has a model.
+- **What is stored is not what is indexed.** A memory keeps its full text for a
+  human or a reader to consume; the index can hold something narrower and more
+  distinctive. Separating the two moved PrecisionMemBench from 0.6104 to 0.7922
+  with no other change, because explanatory prose shares its ordinary words with
+  the whole domain and outranks the one distinctive name.
+
+Memories also carry `tags` (scope), `superseded_by` (replacement) and `refs`
+(one-hop links). None of these is inferred and none needs a model — they are facts
+the writer knows and the text does not say.
 
 ## Install
 
@@ -195,6 +205,11 @@ One SQLite file. Rows are turns; the unit of retrieval is the session. Index
 tokens are computed at write time and cached in a column, so rebuilding the
 in-memory index is a counting exercise rather than a re-segmentation.
 
+Each row also carries `tags`, `superseded_by`, `refs` and an optional separate
+index text — metadata the caller supplies at write time and the store filters and
+expands on at read time. These are what make PrecisionMemBench solvable at all;
+without them the same BM25 scores 0.3766.
+
 Writes commit in batches. A 1,016-turn import took 3.8 s one commit at a time
 and 0.25 s inside `batch()` — a thousand individual commits costs more than the
 thousand writes.
@@ -245,20 +260,98 @@ questions. See [D-018](docs/decisions.md#d-018-corpus-absence-is-not-session-abs
 All numbers are reproducible from the `bench/` scripts, which import the
 shipping code rather than a copy of it.
 
-### LongMemEval (English)
+### LongMemEval (English) — retrieval
 
-BM25 over character bigrams, 470 answerable questions, average haystack of 493
-turns:
+470 answerable questions over the `s` variant (average haystack 493 turns), BM25
+over character bigrams:
 
 ```
-hit@1    0.866
-hit@5    0.951
-hit@10   0.966
-MRR      0.899
+hit@1    0.8660
+hit@5    0.9511
+hit@10   0.9660
+MRR      0.8990
 ```
 
-Retrieval is not the hard part of long-term memory. 96.6% of answers are in the
-top ten.
+Reproduce with `python -m bench.run_longmemeval --dataset s`. `bench/data/` is
+fetched by `bench/fetch_data.py` rather than committed — 264 MB of JSON does not
+belong in git, and the fetcher reproduces it byte-for-byte.
+
+**On this benchmark, retrieval is not the hard part.** 96.6% of answers are in
+the top ten.
+
+That sentence used to appear here as a general claim, and it was wrong. It holds
+for this benchmark and does not transfer:
+
+| benchmark | metric | this store | previous best published |
+|---|---|---|---|
+| LongMemEval `s` | hit@10 | 0.9660 | — |
+| PrecisionMemBench | pass | **0.8312** | 0.4675 |
+| LoCoMo | hit@1 | **0.6270** | not comparable (see below) |
+
+The retriever is the same in all three. What differs is what the question asks
+for. LongMemEval asks broad questions over a large haystack and accepts a hit in
+the top ten. PrecisionMemBench asks whether exactly the right belief comes back
+and nothing else — one extra document fails the case. On the first, retrieval is
+solved; on the second, the best published system gets less than half right.
+
+"Retrieval is easy" and "retrieval is hard" are both true. Which one you get
+depends entirely on what counts as a hit.
+
+### PrecisionMemBench — retrieval precision
+
+77 single-turn cases over 35 beliefs. No generation model and no judge: the
+answer *is* the set of belief IDs the store returns, and each case asserts which
+IDs may and may not be in it. Noise is a hard failure.
+
+```
+pass    64/77 = 0.8312
+active  34/43 = 0.7907     (cases that need query-dependent retrieval)
+```
+
+Published on the same data (AMB `external_results.json`):
+
+```
+this store             0.8312
+open-knowledge-format  0.4675
+gbrain                 0.4416
+supermemory            0.2727
+zep                    0.1169
+atomicmemory           0.1169
+agentmemory            0.0909
+```
+
+`python -m bench.pmb.run` — no API key, no network, data in `bench/pmb/data/`.
+
+This is the corpus where D-020 said BM25 would fail — 35 beliefs, near-identical
+subjects, the same word `redis` in both the code memory and the writing memory.
+It failed at 0.3766 until memories carried scope tags, supersession links and
+relation refs (D-025), and until the index held the belief's own names rather
+than its explanatory prose (D-026). Same BM25 throughout; only the write side and
+the index changed.
+
+### LoCoMo — retrieval
+
+1540 questions over 272 sessions, 5882 turns, ten independent conversation
+samples.
+
+```
+hit@1   0.6270
+hit@5   0.8850
+hit@10  0.9471
+MRR     0.7369
+```
+
+`python -m bench.locomo.run` — no model, data committed.
+
+**Not comparable to published LoCoMo numbers.** Those (0.67–0.92) measure answer
+accuracy under an LLM judge; these measure whether the right session was
+retrieved. `hit@5 = 0.8850` bounds what a reader could achieve — and MemMachine
+(0.9169) and Honcho (0.8990) exceed that bound, which means their retrieval is
+better than this one, not that their answers are.
+
+The design lesson here: retrieval unit must match the answer's unit. Indexing
+turns instead of sessions costs 8.2 points of hit@1 (0.5447 → 0.6270) with no
+other change.
 
 ### Chinese benchmark
 
@@ -311,11 +404,23 @@ recency tie-break (cost 0.25 on the clean corpus), a concreteness bonus
 [D-020](docs/decisions.md#d-020-bag-of-words-retrieval-degrades-on-dense-same-topic-corpora)
 and [D-021](docs/decisions.md#d-021-oracle-entities-recover-15-the-failure-is-not-missing-literals).
 
-Practical consequence: BM25 is adequate when a topic appears once or twice in the
-corpus, and degrades in proportion to near-duplicates. Read the top five, weight
-`corpus_missing` over raw score, and have the caller name the specific instance —
-"the keywords.py fix", not "the fix". That is why the system returns evidence
-rather than a verdict, from three independent measurements.
+Practical consequence, **revised after D-025 and D-026**: BM25 is adequate when a
+topic appears once or twice in the corpus. When it does not, the fix is at write
+time, not at query time.
+
+This section originally concluded that BM25 could not handle dense near-duplicates
+at all. That was too strong, and PrecisionMemBench is the counter-example: 35
+beliefs, near-identical subjects, the same word `redis` in two different
+memories. The same BM25 scores 0.8312 there once memories carry scope tags,
+supersession links and relation refs, and once the index holds the belief's names
+rather than its prose. Four query-side fixes were measured and every one failed —
+BM25 parameter sweeps, coverage thresholds, score ratios, missing-term ratios.
+
+The 0.000 above is real. It is what *untagged* BM25 does to a corpus where every
+document is about the same subject. Read the top five, weight `corpus_missing`
+over raw score, and label your memories — scope, kind, what supersedes what. That
+is why the system returns evidence rather than a verdict, from three independent
+measurements.
 
 ### Abstention
 
@@ -347,30 +452,54 @@ no memory:
 0.81 s × 30 memory lookups in a task is 24 seconds of added latency, spent on a
 judgement the calling agent could make while it is already reasoning.
 
+## Against the frontier
+
+Where this sits relative to the current agent-memory landscape, stated plainly
+because a README that only lists strengths is a sales page.
+
+| Capability | Status here |
+|---|---|
+| Structured memory (typed facts, preferences, entities) | **Partial.** `kind` is a free-form label, `tags` are scopes, `refs` are links. No schema, no validation — the caller decides what a kind means. |
+| Temporal / graph memory (validity windows, relation evolution) | **Not built.** `created_at` exists and `superseded_by` records replacement, but there is no validity interval and no graph traversal at query time. A graph was built and measured; it changed nothing on the Chinese corpus (D-024), which is why it is not wired in. `refs` gives one-hop expansion, not traversal. |
+| Conflict resolution | **Built, deterministic.** `supersede(old, new)`; the replaced memory stops surfacing. No model involved. PrecisionMemBench supersession category: 3/3. |
+| Write-path deduplication / pattern extraction | **Not built.** Extraction exists (`remember()`) and is **off by default**, because measured at write time it costs retrieval (D-023). |
+| Multi-retriever fusion | **Not built.** One retriever: BM25 over bigrams and optionally jieba words. |
+| Forgetting / consolidation | **Crude.** `prune(keep_sessions=N)` is recency-based size control, not retrieval improvement. Recovering a noisy corpus needs deleting 95% of it — emptying, not forgetting (D-022). |
+| Cross-session aggregation | **Not built.** Explicitly out of scope so far. |
+| Proactive recall | **Not built.** Retrieval is caller-initiated. |
+| Multimodal | **Not built.** |
+| Hallucination defence | **Partial.** Evidence/verdict separation, `corpus_missing`, three-state judge results. Nothing that detects a wrong answer produced from a correct retrieval. |
+| Reproducibility of published numbers | **Strong.** Three benchmarks, two with no model in the loop at all. This is the axis where the project is ahead of most of the field, and it is a consequence of the model-free rule rather than a goal in itself. |
+
+The honest summary: **this is a retrieval layer with unusually careful measurement,
+not a cognitive architecture.** It does one thing — find the right memory and say
+clearly what it found and what it did not — and declines the rest on purpose.
+Whether that is the right trade depends on the caller. An agent that already has
+a model wants evidence and a clean abstention signal, not a second model's
+opinion about its own memory.
+
 ## Status
 
-Stage 0 (evaluation) and Stage 1 (core implementation) are complete: library,
-CLI, MCP server.
+Library, CLI and MCP server are complete. The metadata layer — scope tags,
+supersession links, relation refs, and a separate index text — landed after the
+first benchmarks were written, which is why an earlier version of this README
+described a weaker system than the one that exists.
 
-Not built: PyPI release, cross-session aggregation.
+Not built: PyPI release, cross-session aggregation, time-decayed forgetting,
+multi-retriever fusion. The table above is the complete list.
 
-Forgetting is implemented as `prune(keep_sessions=N)` — recency-based retention
-for bounding size, not a retrieval improvement. Measured: recovering a noisy
-corpus needs deleting 95% of it, which is emptying rather than forgetting
-(D-022).
+The [decision log](docs/decisions.md) records what was rejected and why — 26
+entries, both directions; the [research notes](docs/research.md) and
+[landscape analysis](docs/landscape.md) cover the surrounding field.
 
-The [decision log](docs/decisions.md) records what was rejected and why; the
-[research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
-cover the surrounding field.
-
-The known limits are measured, not rhetorical: retrieval degrades on dense
-near-duplicates (D-020), and no query-side trick recovers it (D-021). Both are
-consequences of matching words rather than meanings, and the architecture is
-built around that rather than pretending otherwise.
+Known limits, all measured. Untagged retrieval degrades on dense near-duplicates
+(D-020) and no query-side trick recovers it (D-021); the fix is at write time
+(D-025, D-026). LoCoMo hit@1 is 0.6270, which does not beat the best published
+answer accuracy on that dataset — and the gap there is retrieval, not reading.
 
 ## Design decisions
 
-Twenty-two decisions, each with the measurement or reasoning behind it, in
+Twenty-six decisions, each with the measurement or reasoning behind it, in
 [`docs/decisions.md`](docs/decisions.md). Both directions are recorded —
 including the hypotheses that were tested and failed.
 
@@ -383,10 +512,14 @@ python -m pytest tests/ -q
 python -m ruff check src bench tests
 python -m ruff format --check src bench tests
 python -m bench.zh.e2e
+python -m bench.pmb.run
+python -m bench.locomo.run
 ```
 
 `bench/zh/e2e.py` runs the shipping code path and should report `hit@1 0.9250`.
-A change to retrieval, tokenisation, or scoring that lowers it is a regression.
+`bench.pmb.run` should report `pass 64/77`; `bench.locomo.run` should report
+`hit@1 0.6270`. A change to retrieval, tokenisation or scoring that lowers any of
+them is a regression. The last two need no API key and no network.
 
 Changes to a design decision belong in `docs/decisions.md` as a new entry, with
 the measurement that justifies it.
