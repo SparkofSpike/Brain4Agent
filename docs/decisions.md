@@ -1420,3 +1420,53 @@ narrower claim, best third-party result on both columns, is what survives. Still
 fuzzy matching -- "k9s" for k8s, "mango" for MongoDB. Selection is largely solved;
 ranking is not. Edit distance is the obvious next step and the last one that a
 rule can plausibly close.
+---
+
+## D-027 Supersession redirects, it does not hide
+
+**Context.** `supersede(old, new)` was implemented as a filter: a superseded
+memory was excluded from search results. An exchange with the user exposed why
+that is not just wrong but backwards.
+
+```
+old: 主库是 MySQL 8.0
+new: 上个月迁到 PostgreSQL，MySQL 已下线
+
+search("主库") before supersede  ->  [old]
+search("主库") after  supersede  ->  []
+```
+
+The new memory never says 主库. The old one is the only thing that matched, and
+dropping it dropped the answer. **A memory system that forgets a fact the moment
+it is updated is worse than one that never had it** — the user asks a question
+they have already answered, and gets silence instead of the correction.
+
+I had this in place for several days and described it in the README as working.
+It took one concrete example to show it was not.
+
+**Decision.** A hit on a superseded memory resolves to its replacement. The score
+stays the old memory's score, because the old memory is what matched the query.
+
+Chain following is bounded by a visited set; a cycle returns nothing rather than
+looping. `include_superseded=True` opts out of redirection entirely — that is the
+"show me the history" path, and it should show what actually matched.
+
+**Measured.** No change on PrecisionMemBench (64/77 total, 34/43 active). Its
+supersession cases query the current belief directly, so the redirect never
+fires. **The benchmark could not see this bug; thirty seconds of use could.**
+
+That is worth recording as a limitation of the benchmark, not just of the code.
+PrecisionMemBench asks "does the right belief come back"; it does not ask "does a
+question phrased against the *old* belief still get answered". Those are different
+questions and only one of them was being measured.
+
+**What this is not.** It is not cross-session aggregation. Two memories still
+exist; one points at the other. Nothing is merged, and no model decides that they
+describe the same thing — the caller asserts it. The only change is what a search
+does when it lands on the replaced one.
+
+**The residual.** If the new memory shares no vocabulary with the old, this
+recovers the *session* but the evidence's coverage score stays low, because the
+session text genuinely does not contain the query's words. Indexing the old
+memory's terms into the new one would fix that. Not done, and it is the next
+piece of work in this area.

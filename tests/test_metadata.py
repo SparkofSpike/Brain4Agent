@@ -201,3 +201,55 @@ class TestIndexText:
         with MemoryStore(tmp_path / "d.db") as s:
             mid = s.add("text here", index_text="narrow")
             assert s.memory(mid) is not None
+
+
+class TestSupersessionRedirect:
+    """A hit on a replaced memory must resolve to its replacement, not vanish.
+
+    Dropping the old one was the first implementation and it lost the answer:
+    "main store" matched the MySQL memory, the PostgreSQL memory never says
+    "main store", and the search returned nothing at all. A memory system that
+    forgets a fact the moment it is updated is worse than one that never had it.
+    """
+
+    def test_old_word_finds_new_memory(self, store: MemoryStore) -> None:
+        old = store.add("主库是 MySQL 8.0", session_id="jan")
+        new = store.add("迁到 PostgreSQL，MySQL 已下线", session_id="mar")
+        store.supersede(old, new)
+        hits = store.search("主库")
+        assert [e.memory.content for e in hits.evidence] == ["迁到 PostgreSQL，MySQL 已下线"]
+
+    def test_chain_resolves_to_the_end(self, store: MemoryStore) -> None:
+        a = store.add("v0 用 MySQL", session_id="a")
+        b = store.add("v1 用 PostgreSQL", session_id="b")
+        c = store.add("v2 用 SQLite", session_id="c")
+        store.supersede(a, b)
+        store.supersede(b, c)
+        assert [e.memory.content for e in store.search("MySQL").evidence] == ["v2 用 SQLite"]
+
+    def test_include_superseded_does_not_redirect(self, store: MemoryStore) -> None:
+        old = store.add("主库是 MySQL", session_id="jan")
+        new = store.add("迁到 PostgreSQL", session_id="mar")
+        store.supersede(old, new)
+        hits = store.search("主库", include_superseded=True)
+        assert [e.memory.content for e in hits.evidence] == ["主库是 MySQL"]
+
+    def test_two_olds_pointing_at_one_new_are_deduped(self, store: MemoryStore) -> None:
+        a = store.add("缓存用 Redis", session_id="a")
+        b = store.add("缓存也用 Redis", session_id="b")
+        c = store.add("缓存换 Memcached 了", session_id="c")
+        store.supersede(a, c)
+        store.supersede(b, c)
+        hits = store.search("缓存")
+        assert len(hits.evidence) == 1
+
+    def test_cycle_does_not_hang(self, store: MemoryStore) -> None:
+        """A corrupt DB should return less, never loop."""
+        a = store.add("甲", session_id="a")
+        b = store.add("乙", session_id="b")
+        store.supersede(a, b)
+        # 手动制造一个环，绕过 supersede 的单向保护
+        with store._db:
+            store._db.execute("UPDATE memories SET superseded_by = ? WHERE id = ?", (a, b))
+        store._dirty = True
+        store.search("甲")  # 不抛异常、不挂死即可

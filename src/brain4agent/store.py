@@ -667,11 +667,22 @@ class MemoryStore:
             # matching set costs little at this corpus size and keeps the filter
             # truthful.
             raw = self._index.search(query, top_k=len(self._index))
-            hits = [
-                (mid, score)
-                for mid, score in raw
-                if self._visible(mid, tags, kinds, include_superseded)
-            ]
+            hits = []
+            seen: set[str] = set()
+            for mid, score in raw:
+                # A hit on a superseded memory is redirected to its replacement,
+                # not dropped. Dropping was the first implementation and it lost
+                # the answer entirely: "main store" matched the old MySQL memory,
+                # the new PostgreSQL memory never says "main store", and the
+                # search returned nothing at all. The score stays the old one's
+                # because the old one is what matched.
+                target = mid if include_superseded else self._current(mid)
+                if target is None or target in seen:
+                    continue
+                if not self._visible(target, tags, kinds, include_superseded):
+                    continue
+                seen.add(target)
+                hits.append((target, score))
         else:
             hits = self._index.search(query, top_k=top_k * 3)
 
@@ -754,6 +765,25 @@ class MemoryStore:
             )
         self._dirty = True
         return len(fresh)
+
+    def _current(self, memory_id: str) -> str | None:
+        """Follow the supersession chain to the memory that is current now.
+
+        Returns None on a cycle. A corrupt database should make a search return
+        less, never hang.
+        """
+        seen: set[str] = set()
+        mid = memory_id
+        while True:
+            if mid in seen:
+                return None
+            seen.add(mid)
+            mem = self._by_id.get(mid)
+            if mem is None:
+                return None
+            if not mem.superseded_by:
+                return mid
+            mid = mem.superseded_by
 
     def _visible(
         self,

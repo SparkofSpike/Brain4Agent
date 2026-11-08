@@ -548,10 +548,21 @@ first benchmarks were written.
 
 **Deliberately not built, and not planned:**
 
-- **Cross-session aggregation.** This is a retrieval layer. Merging several
-  sessions into one summary is a different system with a different failure mode,
-  and doing it badly is worse than not doing it.
+- **Automatic cross-session merging.** Retrieval already spans sessions — one
+  query searches every stored session and returns the best of them. What is not
+  built is *synthesising* several sessions into one summary. That needs a model,
+  or a rule for deciding that two memories describe the same thing, and merging
+  badly loses detail the reader could have weighed themselves.
 - **Multimodal.** Out of scope.
+
+**Recently fixed:**
+
+- **A replaced memory used to vanish.** `supersede(old, new)` hid the old one, but
+  when the new one used different words — "main store is MySQL" replaced by
+  "migrated to PostgreSQL" — a query for "main store" matched only the hidden
+  one, and the search returned nothing at all. A memory system that forgets a
+  fact the moment it is updated is worse than one that never had it. Hits are now
+  redirected to the current memory instead of dropped (D-027).
 
 **Not built, on the list:**
 
