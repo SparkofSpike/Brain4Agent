@@ -110,6 +110,44 @@ the setting would be the kind of benchmark gaming this project exists to
 criticise, so: **every number on this page uses `top_k=1` with relation
 expansion**. The store's default is `top_k=5`.
 
+## Tried, and did not help
+
+Recorded because a negative result that stays unpublished gets re-tried by the
+next person.
+
+**BM25 parameter sweep.** k1 in {0.8, 1.2, 1.5, 2.0, 2.5} x b in {0.2, 0.4,
+0.6, 0.75, 0.9}. Every combination scored between 0.5974 and 0.6104, and `b`
+made no difference at all -- every belief document is roughly the same length, so
+length normalisation has nothing to normalise. The defaults were already fine.
+
+**Coverage as an abstention signal.** The idea: a question about something the
+corpus does not contain should have low query-term coverage. Measured
+otherwise.
+
+```
+              min    p25   median   max
+expected      0.03   0.18   0.30    1.00
+not expected  0.00   0.11   0.16    0.43
+```
+
+A threshold of 0.4 catches 19 of the 21 cases that should return nothing, and
+wrongly abstains on 29 of the 41 that should return something. Net -10. The
+distributions overlap because queries are three to six words and beliefs are
+long: even a perfect match covers under half the question's terms.
+
+**Score-ratio heuristics.** Keep results within 0.5 or 0.7 of the top score, cap
+at k=3. Both scored worse on both axes than plain `top_k=1` (0.5195 and 0.5584
+against 0.6104).
+
+**Missing-term ratio.** The fraction of content words absent from the corpus.
+Median 0.33 for expected cases, 0.50 for not-expected -- the best threshold
+bought four net cases while killing five correct ones. Not worth the
+complexity.
+
+What all four have in common: they try to read intent off the query's words.
+The signals that actually worked were labels supplied at *write* time, and no
+amount of query-side cleverness substituted for them.
+
 ## Reproducing
 
 ```bash

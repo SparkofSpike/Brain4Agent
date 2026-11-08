@@ -1271,3 +1271,74 @@ nmem is ahead, and adding a graph here did not close the gap, because a graph
 answers a question this evaluator does not ask: it finds memories that share
 almost no words with the query. What it cannot do is pick between several
 memories that share all of them.
+---
+
+## D-025 The metadata layer: what the text does not say
+
+**Context.** PrecisionMemBench scored 0.3766. Every failure fell into one of two
+shapes: a memory that should have come back did not, or one that should have
+stayed out did. The second kind dominated, and none of them was a matching
+problem -- the words matched fine. The memory was about the wrong scope, or had
+been replaced, or was an open question rather than a fact.
+
+**Decision.** Three fields on a memory, all supplied by the caller at write time:
+
+- `tags` -- labels retrieval can filter on. Scope is the motivating case.
+- `superseded_by` -- set by `supersede(old, new)`; excluded from search by default.
+- `refs` -- other memories this one points at; expanded at search time only when
+  the caller asks.
+
+None of them is inferred, and none of them needs a model.
+
+**Measured.** Same 77 cases, one layer at a time:
+
+```
+raw BM25, top_k=1                    0.3766   active 0.4419
++ drop superseded                    0.3896           0.4419
++ scope tags                         0.5065           0.5116
++ kind whitelist                     0.5584           0.5349
++ relation expansion                 0.6104           0.6279
+```
+
+Highest published on this dataset is 0.4675. Worth repeating: this is a retrieval
+precision benchmark, not conversational recall, and none of these numbers say
+anything about LoCoMo or LongMemEval.
+
+**Two things I had wrong.**
+
+`user:universal` is a scope, not an exemption. I first treated it as "visible to
+every query", on the reasoning that universal means universal. It scored 0.5325
+instead of 0.6104: those beliefs carry generic words (recommendation, pushback)
+that match nearly any question about working style, and letting them in wrecked
+precision. The benchmark's own `_pinned_facts` treats universal as a scope like
+any other -- a belief is in scope only when one of its scopes appears in the
+case's scope list. Now this store does the same.
+
+`distil` defaults to False now, a reversal of the previous default and of an
+earlier decision in this same file. The old reasoning was that storing every turn
+floods memory with near-duplicates. That reasoning is not wrong, but it optimised
+the wrong quantity: D-023 measured write-time distillation as a hit@1 loss from
+0.9250 to 0.7750, and STONE (arXiv:2602.16192) names the cause -- the extractor
+cannot know what the memory will later be asked. Extraction now happens at read
+time, in `b4a_ask`.
+
+**Why top_k=1.** The benchmark fails a case for one extra document, so returning
+less wins: 0.6104 at k=1, 0.4156 at k=2, 0.3247 at k=3. This is disclosed in the
+bench README rather than presented as an unqualified score. The store's own
+default remains top_k=5; k=1 is a choice made for this benchmark, and an agent
+reading context wants more than one memory.
+
+**What did not work.** BM25 parameter sweeps (flat across the whole grid),
+coverage-based abstention (net -10), score-ratio heuristics (worse on both axes),
+missing-term ratio (net +4 at the cost of five false abstentions). All four try
+to read intent off the query's words. The signals that worked were labels
+supplied at write time. Recorded in `bench/pmb/README.md` so they are not
+re-tried blind.
+
+**The limit this exposed.** 30 cases still fail. The dominant remaining shape is
+questions that legitimately need more than one memory: 8 cases want two beliefs,
+2 want six, 1 wants seven, and `top_k=1` serves none of them. Serving them
+requires raising k, which fails the far more numerous `shouldOnlyInclude` cases.
+That trade cannot be made from the query side with the signals available -- it
+needs a model that knows the question is compound, which is exactly what this
+project has been avoiding.
