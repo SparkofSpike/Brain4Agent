@@ -137,6 +137,26 @@ class TestTools:
         out = call(server, "b4a_stats", {})
         assert "turns 1" in text_of(out)
 
+    def test_rejects_wrong_argument_types(self, server: Server) -> None:
+        """A caller mistake is a tool error the model can read, not -32603."""
+        cases = [
+            ("b4a_recall", {"query": "测试", "top_k": "abc"}, "top_k"),
+            ("b4a_recall", {"query": "测试", "top_k": 2.7}, "top_k"),
+            ("b4a_remember", {"content": 42}, "content"),
+            ("b4a_remember", {"content": "x", "session_id": 99}, "session_id"),
+            ("b4a_remember", {"content": "x", "role": "hacker"}, "role"),
+        ]
+        for name, args, needle in cases:
+            out = call(server, name, args)
+            assert out["result"]["isError"], f"{name} {args} was accepted"
+            assert needle in text_of(out), out
+        assert len(server.store) == 0
+
+    def test_rejects_non_object_arguments(self, server: Server) -> None:
+        out = server.handle(rpc(2, "tools/call", {"name": "b4a_recall", "arguments": [1, 2]}))
+        assert out["result"]["isError"]
+        assert "must be an object" in text_of(out)
+
     def test_unknown_tool(self, server: Server) -> None:
         out = call(server, "no_such_tool", {})
         assert out["result"]["isError"] is True

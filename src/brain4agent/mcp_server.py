@@ -146,7 +146,11 @@ class Server:
 
     def _call_tool(self, params: dict[str, Any]) -> dict[str, Any]:
         name = params.get("name")
+        if not isinstance(name, str):
+            raise _ToolError("tool name must be a string")
         args = params.get("arguments") or {}
+        if not isinstance(args, dict):
+            raise _ToolError(f"'arguments' must be an object, got {type(args).__name__}")
 
         if name == "b4a_remember":
             return self._remember(args)
@@ -164,20 +168,24 @@ class Server:
     # -- tools -------------------------------------------------------------
 
     def _remember(self, args: dict[str, Any]) -> dict[str, Any]:
-        content = str(args.get("content") or "").strip()
+        content = _arg_str(args, "content") or ""
         if not content:
             raise _ToolError("content must not be empty")
-        sid = args.get("session_id") or self.store.new_session()
-        role = args.get("role") or "user"
-        self.store.add(content, session_id=sid, role=role)
+        sid = _arg_str(args, "session_id") or self.store.new_session()
+        role = _arg_str(args, "role") or "user"
+        if role not in {"user", "assistant", "system"}:
+            raise _ToolError(f"role must be user, assistant or system, got {role!r}")
+        try:
+            self.store.add(content, session_id=sid, role=role)
+        except ValueError as exc:  # empty, too long
+            raise _ToolError(str(exc)) from exc
         return _text(f"stored in session {sid}")
 
     def _recall(self, args: dict[str, Any]) -> dict[str, Any]:
-        query = str(args.get("query") or "").strip()
+        query = _arg_str(args, "query") or ""
         if not query:
             raise _ToolError("query must not be empty")
-        top_k = int(args.get("top_k") or 3)
-        top_k = max(1, min(top_k, 20))
+        top_k = max(1, min(_arg_int(args, "top_k", 3), 20))
 
         result = self.store.search(query, top_k=top_k)
         if result.empty:
@@ -218,7 +226,7 @@ class Server:
         return _text(json.dumps(payload, ensure_ascii=False, indent=2))
 
     def _session(self, args: dict[str, Any]) -> dict[str, Any]:
-        sid = str(args.get("session_id") or "").strip()
+        sid = _arg_str(args, "session_id") or ""
         if not sid:
             raise _ToolError("session_id must not be empty")
         turns = self.store.session(sid)
@@ -228,6 +236,23 @@ class Server:
 
 
 # -- message helpers -------------------------------------------------------
+
+
+def _arg_str(args: dict[str, Any], key: str, default: str | None = None) -> str | None:
+    """Strict string argument. A number here is a caller bug, not a value to coerce."""
+    value = args.get(key, default)
+    if value is None:
+        return default
+    if not isinstance(value, str):
+        raise _ToolError(f"'{key}' must be a string, got {type(value).__name__}")
+    return value.strip()
+
+
+def _arg_int(args: dict[str, Any], key: str, default: int) -> int:
+    value = args.get(key, default)
+    if isinstance(value, bool) or not isinstance(value, int):
+        raise _ToolError(f"'{key}' must be an integer, got {type(value).__name__}")
+    return value
 
 
 class _ToolError(Exception):
