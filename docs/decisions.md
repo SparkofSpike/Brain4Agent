@@ -1680,3 +1680,82 @@ both worth recording because they would have produced wrong conclusions:
 2. The three strategies shared one database file, so each one pruned what the
    previous had already deleted. The last two looked catastrophic for the wrong
    reason. Each now runs on its own copy.
+---
+
+## D-031 First real agent session: two findings the benchmarks could not produce
+
+**Context.** Every number in this repo came from a test I built. D-029's README
+admitted that `b4a_ask`, `recall-context`, weight and SimHash had never been
+exercised by an actual agent. The user pointed out the obvious gap: `codewhale
+exec` exists, run one.
+
+Setup: `b4a` added via `codewhale mcp add`, `BRAIN4AGENT_DB` and `PYTHONPATH`
+written into `~/.codewhale/mcp.json`, a five-memory store built, then
+`codewhale exec --auto "<question>"`.
+
+### Finding 1: an agent with the source in front of it will not consult memory
+
+First question: *"What does Brain4Agent use for retrieval, and why is there no
+distillation at write time?"*
+
+The agent answered correctly and **never called `b4a_recall`**. It ran `bash`,
+read `store.py`, `cli.py` and `read.py`, and derived the answer from the code.
+
+That is the right behaviour and it invalidates the test. A memory store competes
+with the filesystem, and loses whenever the answer is in a file the agent can
+open. Its territory is what is *not* in the workspace: verbal agreements,
+decisions made in conversation, the reason a thing was rejected six weeks ago.
+
+The second experiment used only such memories — "no comments unless asked", "we
+do not publish to PyPI", a server address, a root-cause file and line from an old
+bug. Those cannot be derived from `src/`.
+
+### Finding 2: two memory servers, and the agent picks one
+
+With both `neural-memory` and `b4a` enabled, the agent answered:
+
+> first checked memory: Brain4Agent has only one Stage 0 conclusion in the memory
+> store … no record of code style, release policy, or a test server
+
+Five memories were in the `b4a` store at that moment. It had queried nmem,
+received nothing relevant, and reported that as the state of memory — while
+citing `203.0.113.10` for an unrelated project, which is a fact from the nmem
+brain.
+
+Direct protocol test confirmed `b4a` was healthy: a hand-written MCP handshake
+returned the correct two sessions. The failure was at selection, not at retrieval.
+
+With `codewhale mcp disable neural-memory`, the same prompt worked:
+
+- multiple `b4a_recall` calls with different queries (`注释 依赖 提交`,
+  `服务器 部署 域名 端口 主机`)
+- correct results, each attributed to a session id
+- `corpus_missing` reported honestly — `ruff`, `格式化`, `风格` genuinely absent
+- and a critique the store did not make: it noticed `198.51.100.23` is RFC 5737
+  TEST-NET-2, non-routable, and concluded the memory was probably seed data
+
+That last part is worth noting. The agent used the evidence as evidence — it did
+not treat a retrieved fact as a verified one. That is exactly the posture
+`corpus_missing` and the evidence/verdict split were built for.
+
+### What this changes
+
+**A deployment note, not a code change.** Any user running two memory servers
+will hit Finding 2, and the symptom is the worst kind: the agent says "memory has
+no record of X" when memory has a record of X. The store cannot fix this from
+inside; it has to be documentation — one memory server per agent, or names that
+make the choice unambiguous.
+
+**A test-design lesson.** Benchmark questions that can be answered from the
+corpus they are embedded in measure nothing. The Chinese set and PrecisionMemBench
+both ask about content that exists only in the store, which is why they did not
+expose this — but I had not articulated the rule, and a naive "let the agent try
+it" experiment walked straight into it.
+
+**No code changed.** `b4a` behaved correctly in every test. What failed was
+integration, and it failed in a way only an integration test could show.
+
+**Caveats.** One agent, one prompt pair, five memories, and an experimenter who
+wrote the memories himself. This establishes that the mechanism is usable and
+that co-existence is a hazard. It does not establish that a real user's memory
+corpus is retrievable in practice — that needs weeks, not one session.
