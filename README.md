@@ -544,15 +544,43 @@ opinion about its own memory.
 
 Library, CLI and MCP server are complete. The metadata layer — scope tags,
 supersession links, relation refs, and a separate index text — landed after the
-first benchmarks were written, which is why an earlier version of this README
-described a weaker system than the one that exists.
+first benchmarks were written.
 
-Not built: PyPI release, cross-session aggregation, time-decayed forgetting,
-multi-retriever fusion. The table above is the complete list.
+**Deliberately not built, and not planned:**
 
-The [decision log](docs/decisions.md) records what was rejected and why — 26
-entries, both directions; the [research notes](docs/research.md) and
-[landscape analysis](docs/landscape.md) cover the surrounding field.
+- **Cross-session aggregation.** This is a retrieval layer. Merging several
+  sessions into one summary is a different system with a different failure mode,
+  and doing it badly is worse than not doing it.
+- **Multimodal.** Out of scope.
+
+**Not built, on the list:**
+
+- **Time-decayed forgetting.** `prune` is recency-based size control; D-022
+  measured that recovering a noisy corpus needs deleting 95% of it. A decay that
+  weighs importance rather than age is the next real piece of work.
+- **A recall scheduler.** `recall-context` exists for hooks, but nothing decides
+  when to run it. Every-turn is cheap (1.5 ms) and probably too noisy.
+- **Multi-retriever fusion.** One BM25 today. A second lexical retriever could be
+  tried without breaking the model-free rule.
+- **Schema on `kind`.** It is a free-form string with no validation.
+
+**Measured and rejected — not deferred, decided:**
+
+- **Graph traversal at query time.** Built, measured on the Chinese corpus,
+  changed nothing (D-024). One-hop `refs` expansion does help — 4/4 on
+  PrecisionMemBench — but that is a link, not a traversal.
+- **Write-time extraction.** Off by default because it costs retrieval (D-023).
+
+**Out of reach without a model:**
+
+- **Detecting a wrong answer produced from a correct retrieval.** Every signal
+  here says whether the right memory came back; none says whether the reader used
+  it well. That needs a judge, and a judge that is wrong is worse than none.
+
+The [decision log](docs/decisions.md) records 26 entries in both directions —
+including the hypotheses that were tested and failed. The
+[research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
+cover the surrounding field.
 
 Known limits, all measured. Untagged retrieval degrades on dense near-duplicates
 (D-020) and no query-side trick recovers it (D-021); the fix is at write time
