@@ -1607,3 +1607,76 @@ whether the weight is useful, only that adding it broke nothing.**
 A recommendation to actually use `prune_by_weight` would need a corpus where some
 memories are genuinely dead and some are genuinely alive, and a measurement that
 the surviving set still answers the questions. That experiment has not been run.
+---
+
+## D-030 Pruning on a real corpus: age is anti-correlated with usefulness
+
+**Context.** D-029 shipped `prune_by_weight` and `decay`, and said plainly that
+the mechanism was tested while the *value* was not — it needed a corpus where
+some memories are genuinely dead and some genuinely alive, plus a record of which
+were which. The user pointed at the obvious source: the nmem brain on this
+machine, 2925 fibers accumulated over months of real use.
+
+**Decision.** Run the experiment. `bench/nmem/prune_probe.py` copies the database,
+imports it, replays the recorded usage as reinforcement, and compares two pruning
+policies at equal size.
+
+**Measured.**
+
+```
+2891 fibers with usable text  (34 dropped as UTF-8-read-as-GBK mojibake)
+ 660 ever recalled            (22.8%)
+2231 never recalled
+```
+
+Prune to 660 — the size of the genuinely-used set:
+
+```
+strategy                 kept   lived kept   self-recall
+---------------------- ------ ------------ -------------
+no pruning               2891       100.0%         64.6%
+by weight (usage)         660       100.0%         31.5%
+by age (newest first)     660         0.0%         90.2%
+random                    660        22.1%         69.8%
+```
+
+**By weight keeps every memory that was ever used. By age keeps none of them, and
+does it worse than random.** The reason is structural, not statistical: a memory
+that has been useful for months is old, so age-ordered pruning deletes exactly
+the memories that earned their keep. Age is not uncorrelated with usefulness
+here — it is *anti*-correlated, and D-022's finding that pruning needs to delete
+95% of a noisy corpus before retrieval recovers is the same fact measured a
+different way.
+
+**The number that argues the other way, kept rather than buried.** `self-recall`
+— can a memory still be found by its own text — falls from 64.6% to 31.5% after
+weight-based pruning. The surviving set is the memories that were used, and those
+cluster around a few subjects, so they compete with each other on any query. Age
+pruning keeps newer, more varied memories: individually easy to find, mostly
+useless.
+
+The two metrics answer different questions. `lived kept` asks whether the store
+kept what mattered; `self-recall` asks whether each survivor is individually
+locatable. A retrieval layer that exists to answer questions the user actually
+asks should be judged on the first. An archive judged on browsing should be
+judged on the second. This is the former, and the README says which one is being
+quoted.
+
+**What this does not establish.** One user, one corpus, one machine. The 0.0% is
+a property of *this* usage pattern; someone whose work is uniformly recent would
+see a different number and the policy might compare differently. And `frequency`
+is nmem's counter, recorded by a different retrieval system with different
+failures — a proxy for usefulness, not a measurement of it. Weight-based pruning
+agreeing with observed usage is not the same as weight-based pruning agreeing with
+value.
+
+**What changed in the code.** Nothing. The experiment tested what D-029 shipped;
+it did not reveal a defect. Two bugs were found and fixed in the *probe* itself,
+both worth recording because they would have produced wrong conclusions:
+
+1. The first version pruned without a decay pass. Every memory starts at the
+   neutral weight 0.5, so "prune by weight" deleted nothing at all and the policy
+   looked identical to no pruning.
+2. The three strategies shared one database file, so each one pruned what the
+   previous had already deleted. The last two looked catastrophic for the wrong
+   reason. Each now runs on its own copy.
