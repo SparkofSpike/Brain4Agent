@@ -39,7 +39,7 @@ SERVER_NAME = "brain4agent"
 
 TOOLS: list[dict[str, Any]] = [
     {
-        "name": "memory_remember",
+        "name": "b4a_remember",
         "description": (
             "Store one turn in long-term memory. Pass session_id to append to an "
             "existing conversation; omit it to start a new one. Returns the session id."
@@ -62,7 +62,7 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "memory_recall",
+        "name": "b4a_recall",
         "description": (
             "Search long-term memory. Returns ranked sessions with coverage, plus two "
             "different absence signals. `corpus_missing` lists words the question "
@@ -81,7 +81,7 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "memory_session",
+        "name": "b4a_session",
         "description": "Read one whole session in order, given its id.",
         "inputSchema": {
             "type": "object",
@@ -90,7 +90,7 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
-        "name": "memory_stats",
+        "name": "b4a_stats",
         "description": "Counts: turns stored, sessions, distinct index terms.",
         "inputSchema": {"type": "object", "properties": {}},
     },
@@ -148,13 +148,13 @@ class Server:
         name = params.get("name")
         args = params.get("arguments") or {}
 
-        if name == "memory_remember":
+        if name == "b4a_remember":
             return self._remember(args)
-        if name == "memory_recall":
+        if name == "b4a_recall":
             return self._recall(args)
-        if name == "memory_session":
+        if name == "b4a_session":
             return self._session(args)
-        if name == "memory_stats":
+        if name == "b4a_stats":
             st = self.store.stats()
             return _text(
                 f"turns {st['turns']}, sessions {st['sessions']}, terms {st['index_terms']}"

@@ -47,7 +47,7 @@ class TestHandshake:
     def test_tools_listed(self, server: Server) -> None:
         out = server.handle(rpc(1, "tools/list"))
         names = {t["name"] for t in out["result"]["tools"]}
-        assert names == {"memory_remember", "memory_recall", "memory_session", "memory_stats"}
+        assert names == {"b4a_remember", "b4a_recall", "b4a_session", "b4a_stats"}
 
     def test_every_tool_has_schema(self, server: Server) -> None:
         out = server.handle(rpc(1, "tools/list"))
@@ -69,26 +69,26 @@ class TestHandshake:
 
 class TestTools:
     def test_remember_returns_session(self, server: Server) -> None:
-        out = call(server, "memory_remember", {"content": "中文查询搜不到记忆"})
+        out = call(server, "b4a_remember", {"content": "中文查询搜不到记忆"})
         assert "stored in session" in text_of(out)
         assert out["result"]["isError"] is False
 
     def test_remember_empty_content(self, server: Server) -> None:
-        out = call(server, "memory_remember", {"content": "   "})
+        out = call(server, "b4a_remember", {"content": "   "})
         assert out["result"]["isError"] is True
 
     def test_remember_appends_to_session(self, server: Server) -> None:
-        first = call(server, "memory_remember", {"content": "第一轮"})
+        first = call(server, "b4a_remember", {"content": "第一轮"})
         sid = text_of(first).split()[-1]
-        call(server, "memory_remember", {"content": "第二轮", "session_id": sid})
+        call(server, "b4a_remember", {"content": "第二轮", "session_id": sid})
 
-        out = call(server, "memory_session", {"session_id": sid})
+        out = call(server, "b4a_session", {"session_id": sid})
         turns = json.loads(text_of(out))
         assert len(turns) == 2
 
     def test_recall_returns_evidence(self, server: Server) -> None:
-        call(server, "memory_remember", {"content": "中文查询搜不到，根因在 keywords.py"})
-        out = call(server, "memory_recall", {"query": "中文查询为什么搜不到"})
+        call(server, "b4a_remember", {"content": "中文查询搜不到，根因在 keywords.py"})
+        out = call(server, "b4a_recall", {"query": "中文查询为什么搜不到"})
         payload = json.loads(text_of(out))
         assert payload["found"] is True
         assert payload["evidence"]
@@ -96,36 +96,36 @@ class TestTools:
 
     def test_recall_reports_missing_terms(self, server: Server) -> None:
         """The whole reason this server exists: say which word is absent."""
-        call(server, "memory_remember", {"content": "杭州测试机的地址是 114.215.175.63"})
-        out = call(server, "memory_recall", {"query": "杭州测试机上装的是什么数据库"})
+        call(server, "b4a_remember", {"content": "杭州测试机的地址是 114.215.175.63"})
+        out = call(server, "b4a_recall", {"query": "杭州测试机上装的是什么数据库"})
         payload = json.loads(text_of(out))
         assert "数据库" in payload["corpus_missing"]
 
     def test_recall_miss(self, server: Server) -> None:
-        call(server, "memory_remember", {"content": "媒体投稿界面"})
-        out = call(server, "memory_recall", {"query": "完全无关的主题"})
+        call(server, "b4a_remember", {"content": "媒体投稿界面"})
+        out = call(server, "b4a_recall", {"query": "完全无关的主题"})
         payload = json.loads(text_of(out))
         assert payload["found"] is False
         assert out["result"]["isError"] is False
 
     def test_recall_empty_query(self, server: Server) -> None:
-        out = call(server, "memory_recall", {"query": ""})
+        out = call(server, "b4a_recall", {"query": ""})
         assert out["result"]["isError"] is True
 
     def test_recall_top_k_clamped(self, server: Server) -> None:
         for i in range(40):
-            call(server, "memory_remember", {"content": f"共同词汇 第{i}条"})
-        out = call(server, "memory_recall", {"query": "共同词汇", "top_k": 999})
+            call(server, "b4a_remember", {"content": f"共同词汇 第{i}条"})
+        out = call(server, "b4a_recall", {"query": "共同词汇", "top_k": 999})
         payload = json.loads(text_of(out))
         assert len(payload["evidence"]) <= 20
 
     def test_session_missing(self, server: Server) -> None:
-        out = call(server, "memory_session", {"session_id": "nope"})
+        out = call(server, "b4a_session", {"session_id": "nope"})
         assert out["result"]["isError"] is True
 
     def test_stats(self, server: Server) -> None:
-        call(server, "memory_remember", {"content": "内容"})
-        out = call(server, "memory_stats", {})
+        call(server, "b4a_remember", {"content": "内容"})
+        out = call(server, "b4a_stats", {})
         assert "turns 1" in text_of(out)
 
     def test_unknown_tool(self, server: Server) -> None:
@@ -146,8 +146,8 @@ class TestWire:
             rpc(1, "initialize"),
             rpc(2, "tools/list"),
             {"jsonrpc": "2.0", "method": "notifications/initialized"},
-            rpc(3, "tools/call", {"name": "memory_remember", "arguments": {"content": "中文测试"}}),
-            rpc(4, "tools/call", {"name": "memory_recall", "arguments": {"query": "中文测试"}}),
+            rpc(3, "tools/call", {"name": "b4a_remember", "arguments": {"content": "中文测试"}}),
+            rpc(4, "tools/call", {"name": "b4a_recall", "arguments": {"query": "中文测试"}}),
         ]
         stdin = "\n".join(json.dumps(m) for m in messages) + "\n"
 
