@@ -16,9 +16,9 @@ brain4agent = "brain4agent.cli:main"
 # Only what Stage 0 actually needs. Nothing is added before a benchmark
 # number shows it is necessary -- see docs/decisions.md.
 dev = ["pytest>=8"]
-# Raises the quality of missing_terms: a real dictionary splits 数据库 as one
-# word instead of 数据 + 据库. Not required -- without it the report falls back
-# to bigrams, which is noisier but never wrong about presence.
+# Not a hard requirement, but the single biggest retrieval win measured so
+# far: dictionary segmentation takes hit@1 from 0.825 to 0.925 (D-019).
+# Without it the core falls back to bigrams on both sides and still works.
 precise = ["jieba>=0.42"]
 
 [tool.setuptools.packages.find]

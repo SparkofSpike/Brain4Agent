@@ -87,7 +87,14 @@ Stage 1 起才写核心，且只在 Stage 0 指出问题的地方写。
 命令行最快：
 
 ```bash
-# 装：pip install -e .        （只需 Python 3.11+，无必装依赖）
+# 推荐（带 jieba，检索质量 hit@1 0.925）
+pip install -e ".[precise]"
+
+# 或者零依赖（自动回退到 bigram，hit@1 0.825，功能完整）
+pip install -e .
+```
+
+```bash
 $ brain4agent exchange \
     "中文查询搜不到记忆，nmem recall 返回空" \
     "根因在 keywords.py 第 443 行，正则不含汉字范围"
@@ -184,10 +191,12 @@ if judge:
 
 ```
 src/brain4agent/
-  tokenize.py   分词与 BM25。bigram 负责匹配，整词负责解释缺了什么
+  tokenize.py   分词与 BM25。索引侧宽（bigram + 词），查询侧准（词）
   store.py      SQLite 存储 + 内存索引，会话为检索单位
   evidence.py   证据结构。算分可以，下结论不行
   judge.py      可选云端判断。默认关，没 key 就没有网络调用
+  cli.py        命令行
+  mcp_server.py MCP stdio 服务，标准库实现
 bench/          评测。复用 src 的代码，保证测的和用的是一套
 docs/           设计决策与调研
 tests/          测试
