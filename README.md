@@ -657,33 +657,14 @@ the measurement that justifies it.
 
 ## Special thanks
 
-To **[nhadaututtheky](https://github.com/nhadaututtheky)**, who wrote
-[**neural-memory**](https://github.com/nhadaututtheky/neural-memory) (nmem).
-
-**This project exists because of it.** It began as a bug report: a Chinese query
-returned zero results while the equivalent English query returned eleven, because
-the keyword extractor's regex had no Han range and the text was silently filtered
-to nothing. Suppressing the error, not raising it, is what made the problem
-interesting.
-
-Fixing it ([PR #228](https://github.com/nhadaututtheky/neural-memory/pull/228))
-was the point where the real finding surfaced: this was not a missing character
-class but an assumption built into the whole design — that a memory is a short
-English sentence. A project cannot patch its way out of that; it has to be built
-the other way round.
-
-So this is not a replacement and not a rebuke. It is what happened after two
-weeks inside nmem, coming out with a different answer to the same question.
-Several of its ideas survive here in altered form — that reading and writing want
-different tokenisations, that a memory system must be able to say *I do not know*
-instead of guessing, and that forgetting is a feature rather than a failure mode.
-Where the two differ, it is because of measurements taken here; and some of those
-measurements say nmem's choices were better than mine.
-
-nmem is also the corpus for the pruning experiment in `bench/nmem/`: 2925 real
-fibers, 660 of them ever actually recalled, which is the only dataset in this
-repo that records what a user genuinely asked for. Without it the claim that
-weight beats age when pruning would still be a hypothesis.
+To [nhadaututtheky](https://github.com/nhadaututtheky) for
+[neural-memory](https://github.com/nhadaututtheky/neural-memory). This project
+began as a bug fix there ([PR #228](https://github.com/nhadaututtheky/neural-memory/pull/228)) —
+a Chinese query returned nothing because the keyword regex had no Han range.
+Fixing it showed that the assumption, not the character class, was the problem, so
+this is a different answer to the same question rather than a replacement. Its
+brain is also the corpus for `bench/nmem/`, the only dataset here that records
+what a user actually asked for.
 
 ## License
 
