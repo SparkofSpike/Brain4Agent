@@ -93,9 +93,7 @@ def replay(store: MemoryStore, fibers: list[dict]) -> dict[str, str]:
     mapping: dict[str, str] = {}
     with store.batch():
         for f in fibers:
-            mapping[f["id"]] = store.add(
-                f["text"], session_id=f"fiber:{f['id']}", tags=["nmem"]
-            )
+            mapping[f["id"]] = store.add(f["text"], session_id=f"fiber:{f['id']}", tags=["nmem"])
     for f in fibers:
         for _ in range(min(f["frequency"], 30)):  # cap: 30 reinforcements is weight 0.5+0.9
             store.reinforce(mapping[f["id"]])
@@ -185,9 +183,7 @@ def main() -> int:
             by_age = sorted(fibers, key=lambda f: f["created_at"], reverse=True)
             doomed = {mapping[f["id"]] for f in by_age[target:]}
             with store._db:
-                store._db.executemany(
-                    "DELETE FROM memories WHERE id = ?", [(i,) for i in doomed]
-                )
+                store._db.executemany("DELETE FROM memories WHERE id = ?", [(i,) for i in doomed])
             store._reload()
             kept_fibers = [f for f in fibers if mapping[f["id"]] not in doomed]
             kept_lived = [f for f in kept_fibers if f["frequency"] > 0]
@@ -202,9 +198,7 @@ def main() -> int:
             keep = {mapping[f["id"]] for f in sample}
             doomed = {mapping[f["id"]] for f in fibers} - keep
             with store._db:
-                store._db.executemany(
-                    "DELETE FROM memories WHERE id = ?", [(i,) for i in doomed]
-                )
+                store._db.executemany("DELETE FROM memories WHERE id = ?", [(i,) for i in doomed])
             store._reload()
             kept_fibers = [f for f in fibers if mapping[f["id"]] in keep]
             kept_lived = [f for f in kept_fibers if f["frequency"] > 0]
@@ -215,7 +209,9 @@ def main() -> int:
     print(f"{'strategy':<22} {'kept':>6} {'lived kept':>12} {'self-recall':>12}")
     print(f"{'-' * 22} {'-' * 6} {'-' * 12} {'-' * 12}")
     print(f"{'no pruning':<22} {len(fibers):>6} {'100.0%':>12} {baseline_recall:>12.1%}")
-    print(f"{'by weight (usage)':<22} {weight_size:>6} {weight_lived:>12.1%} {weight_recall:>12.1%}")
+    print(
+        f"{'by weight (usage)':<22} {weight_size:>6} {weight_lived:>12.1%} {weight_recall:>12.1%}"
+    )
     print(f"{'by age (newest first)':<22} {age_size:>6} {age_lived:>12.1%} {age_recall:>12.1%}")
     print(f"{'random':<22} {rnd_size:>6} {rnd_lived:>12.1%} {rnd_recall:>12.1%}")
     print()
