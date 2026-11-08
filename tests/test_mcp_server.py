@@ -163,18 +163,30 @@ class TestTools:
 
 
 class TestWire:
-    def test_stdio_survives_gbk_locale(self, tmp_path: Path) -> None:
-        """The host locale must not decide whether the server can read UTF-8.
+    @pytest.mark.parametrize("encoding", ["utf-8", "cp936", "ascii"])
+    def test_stdio_works_under_locale(self, encoding: str, tmp_path: Path) -> None:
+        """The server must work whatever the host streams default to.
 
-        On a Chinese Windows install sys.stdin defaults to cp936. Before the
-        fix this returned 1 with an empty stdout and a UnicodeDecodeError,
-        because the end-to-end test set PYTHONIOENCODING=utf-8 and hid it.
+        Three failures this covers:
+
+        - ``cp936``: a Chinese Windows console. Before the fix the server read
+          its UTF-8 input as GBK and died inside the read loop.
+        - ``ascii``: a bare C locale, common in containers. Every non-ASCII byte
+          raises unless the stream is pinned.
+        - ``utf-8``: the case that always passed, kept so the others are
+          comparable.
+
+        The child is started *without* PYTHONIOENCODING in the default run; only
+        PYTHONUTF8/PYTHONIOENCODING for the parameter under test is set.
         """
-        db = tmp_path / "gbk.db"
+        db = tmp_path / f"{encoding.replace('-', '')}.db"
         env = {
             "BRAIN4AGENT_DB": str(db),
             "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
-            "PYTHONIOENCODING": "cp936",
+            "PYTHONIOENCODING": encoding,
+            # Make sure UTF-8 mode does not mask the locale: the point is to
+            # force the default streams to the given codec.
+            "PYTHONUTF8": "0",
         }
         payload = json.dumps(
             {
@@ -197,23 +209,25 @@ class TestWire:
             timeout=120,
         )
 
-        assert proc.returncode == 0, proc.stderr.decode("utf-8", "replace")
-        assert proc.stdout, "no response under cp936"
+        stderr = proc.stderr.decode("utf-8", "replace")
+        assert proc.returncode == 0, f"[{encoding}] {stderr}"
+        assert proc.stdout, f"[{encoding}] no response"
         json.loads(proc.stdout.decode("utf-8"))
 
         from brain4agent import MemoryStore
 
         with MemoryStore(db) as store:
             contents = [t.content for turns in store._by_session.values() for t in turns]
-        assert contents == ["中文内容测试🐱"], f"stdout={proc.stdout.decode('utf-8', 'replace')!r}"
+        assert contents == ["中文内容测试🐱"], f"[{encoding}] stdout={proc.stdout!r}"
 
     def test_stdio_roundtrip(self, tmp_path: Path) -> None:
         """The real process, the real stream -- stdout must be JSON only."""
         db = tmp_path / "wire.db"
+        # No PYTHONIOENCODING on purpose: the server must pin its own streams.
+        # Setting it here is what let a cp936-only failure reach a release.
         env = {
             "BRAIN4AGENT_DB": str(db),
             "PYTHONPATH": str(Path(__file__).resolve().parents[1] / "src"),
-            "PYTHONIOENCODING": "utf-8",
         }
         messages = [
             rpc(1, "initialize"),

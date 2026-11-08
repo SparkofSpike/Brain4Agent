@@ -106,6 +106,12 @@ BASELINE = {"hit@1": 0.825, "hit@5": 0.950, "hit@10": 1.000, "mrr": 0.8911}
 def main() -> int:
     ap = argparse.ArgumentParser()
     ap.add_argument("--json", action="store_true", help="machine-readable output")
+    ap.add_argument(
+        "--min-hit1",
+        type=float,
+        default=0.0,
+        help="exit non-zero if hit@1 falls below this (use in CI)",
+    )
     args = ap.parse_args()
 
     data = load()
@@ -141,6 +147,10 @@ def main() -> int:
     if result["misses"]:
         print(f"missed: {', '.join(result['misses'])}")
     store.close()
+
+    if result["hit@1"] < args.min_hit1:
+        print(f"FAIL: hit@1 {result['hit@1']:.4f} is below the required {args.min_hit1:.4f}")
+        return 1
     return 0
 
 

@@ -17,7 +17,7 @@ brain4agent = "brain4agent.cli:main"
 [project.optional-dependencies]
 # Only what Stage 0 actually needs. Nothing is added before a benchmark
 # number shows it is necessary -- see docs/decisions.md.
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.6"]
 # Not a hard requirement, but the single biggest retrieval win measured so
 # far: dictionary segmentation takes hit@1 from 0.825 to 0.925 (D-019).
 # Without it the core falls back to bigrams on both sides and still works.
