@@ -163,7 +163,7 @@ def _is_entity_like(term: str) -> bool:
     return len(term) > 1 and term not in _INTERROGATIVE and not all(ch in _FILLER for ch in term)
 
 
-def _content_words(text: str) -> list[str]:
+def content_words(text: str) -> list[str]:
     """Nominals and names from the question, in order.
 
     Uses jieba's POS tagger when available. A long digit-bearing token is kept
@@ -187,6 +187,11 @@ def _content_words(text: str) -> list[str]:
     return out
 
 
+# Backwards-compatible alias: the function was private before the graph
+# needed it from another module.
+_content_words = content_words
+
+
 def question_terms(query: str) -> list[str]:
     """Content terms of the question, longest first.
 
@@ -194,7 +199,7 @@ def question_terms(query: str) -> list[str]:
     absence: for 数据库 what matters is that no session contains it, not that
     数据 appears somewhere.
     """
-    terms = [t for t in _content_words(query) if t not in _INTERROGATIVE and t not in _FILLER]
+    terms = [t for t in content_words(query) if t not in _INTERROGATIVE and t not in _FILLER]
     seen: set[str] = set()
     unique = [t for t in terms if not (t in seen or seen.add(t))]
     return sorted(unique, key=len, reverse=True)

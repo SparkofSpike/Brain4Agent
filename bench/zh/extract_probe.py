@@ -21,9 +21,9 @@ import tempfile
 import time
 from pathlib import Path
 
+from bench.zh.e2e import BASELINE, load, score
 from brain4agent import MemoryStore
 from brain4agent.extract import Extractor
-from bench.zh.e2e import BASELINE, abstention_report, load, score
 
 RESULTS = Path(__file__).parent.parent / "results"
 
@@ -135,7 +135,9 @@ def main() -> int:
     dist = score(data, dist_store)
     dist_stats = dist_store.stats()
     dist_store.close()
-    print(f"  memories {dist_stats['memories'] if 'memories' in dist_stats else dist_stats['turns']}")
+    print(
+        f"  memories {dist_stats['memories'] if 'memories' in dist_stats else dist_stats['turns']}"
+    )
     print(f"  hit@1 {dist['hit@1']:.4f}")
 
     print()

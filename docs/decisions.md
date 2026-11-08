@@ -1193,3 +1193,81 @@ Storing facts and searching them with BM25 gets the worst of both — the noise
 reduction of distillation and the ranking power of a bag of words.
 
 The next piece is the graph. That is now the measured gap, not a guess.
+
+## D-024 Two attempts to fix distilled ranking, both rejected
+
+**Date:** 2026-11-08
+**Status:** Measured, both discarded
+
+**Context**
+
+D-023 showed distilled memories recall as well as raw turns (hit@10 1.000) but
+rank worse (hit@1 0.775 against 0.925). The failure is inside the candidate set,
+not outside it: the right fact is in the top ten and not first.
+
+Two mechanisms were tried, both zero-model.
+
+**Attempt 1: entity co-occurrence graph**
+
+`graph.py` indexes memory ↔ entity, and retrieval expands one hop from the top
+BM25 hits along shared entities with 0.35 decay.
+
+| alpha | hit@1 | MRR |
+|---|---|---|
+| 0.0 | 0.8000 | 0.8794 |
+| 0.2 – 1.0 | 0.8000 | 0.8794 |
+
+**Identical at every weight.** The reason is structural, not a tuning miss: the
+graph can only surface memories *outside* the BM25 candidate list, and the ones
+that need help are already inside it. A boost applied to a memory that is
+already ranked tenth can move it, but every strong hit also propagates a boost,
+so the relative order barely changes.
+
+`EntityGraph` was kept — it is used for nothing yet, and it may matter for
+cross-session questions where recall rather than ordering is the problem — but
+it is not wired into search.
+
+**Attempt 2: re-ranking signals**
+
+Four signals swept over the BM25 order:
+
+| signal | best hit@1 | best alpha |
+|---|---|---|
+| none (baseline) | **0.8000** | — |
+| coverage | 0.7750 | 0.5 / 2.0 |
+| entity overlap | 0.7750 | 0.5 / 2.0 |
+| specificity (paths, numbers) | 0.8000 | 0.5 |
+| brevity | 0.7500 | 0.5 |
+
+**Every signal is neutral or harmful.** The most informative one, `coverage`,
+is already an IDF-weighted version of the thing being measured, and re-weighting
+by it double-counts the same evidence BM25 already used.
+
+**Conclusion**
+
+BM25's order is the ceiling for the signals available without a model. The
+0.775–0.800 range is not an under-tuned result; it is what distilled facts score
+when matched by words.
+
+**What follows**
+
+- Distillation is a **write-time** feature: it filters chit-chat, produces
+  readable memories, and keeps recall at 1.0. It is not a retrieval upgrade, and
+  it costs top-1 precision.
+- `index_source=True` stays the recommended configuration when distilling: it is
+  the best of the distilled variants (0.775 against 0.700).
+- Raw turns remain the default for anything measured against the benchmark,
+  because that is what scores 0.9250.
+
+**The honest reading of "better than neural-memory"**
+
+On Chinese retrieval, faster and simpler deployment, this project is ahead — and
+the comparison in `bench/results/nmem-comparison` shows by how much (0.9250
+against 0.1750, though nmem's number is dominated by a CJK bug this project
+already has a fix for upstream).
+
+On memory *structure* — causal edges, consolidation, decay, graph traversal —
+nmem is ahead, and adding a graph here did not close the gap, because a graph
+answers a question this evaluator does not ask: it finds memories that share
+almost no words with the query. What it cannot do is pick between several
+memories that share all of them.
