@@ -49,6 +49,31 @@ def cmd_add(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_remember(args: argparse.Namespace) -> int:
+    """Store a turn by distilling it into durable memories.
+
+    Slower than add by design: one model call per turn. The trade is that a
+    week of chit-chat does not end up competing with real memories at search
+    time. Without an API key this degrades to storing the raw turn.
+    """
+    store = _open(args)
+    try:
+        ids = store.remember(args.content, session_id=args.session, role=args.role)
+        if not ids:
+            print("nothing durable in that turn -- not stored")
+            return 0
+        first = store._by_session_memory(ids[0])
+        where = first.session_id if first else args.session or "?"
+        print(f"stored {len(ids)} memories in session {where}")
+        for mid in ids:
+            mem = store._by_session_memory(mid)
+            if mem:
+                print(f"  [{mem.kind} {mem.importance:.1f}] {mem.content[:90]}")
+        return 0
+    finally:
+        store.close()
+
+
 def cmd_exchange(args: argparse.Namespace) -> int:
     store = _open(args)
     try:
@@ -204,6 +229,12 @@ def build_parser() -> argparse.ArgumentParser:
     a.add_argument("--session", "-s", default=None)
     a.add_argument("--role", default="user", choices=["user", "assistant", "system"])
     a.set_defaults(func=cmd_add)
+
+    r = sub.add_parser("remember", help="distil a turn into durable memories")
+    r.add_argument("content")
+    r.add_argument("--session", "-s", default=None)
+    r.add_argument("--role", default="user", choices=["user", "assistant", "system"])
+    r.set_defaults(func=cmd_remember)
 
     e = sub.add_parser("exchange", help="store a user/assistant pair as one session")
     e.add_argument("user")

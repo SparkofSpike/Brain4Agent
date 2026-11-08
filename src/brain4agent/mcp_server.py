@@ -42,8 +42,11 @@ TOOLS: list[dict[str, Any]] = [
     {
         "name": "b4a_remember",
         "description": (
-            "Store one turn in long-term memory. Pass session_id to append to an "
-            "existing conversation; omit it to start a new one. Returns the session id."
+            "Store one turn in long-term memory. By default the turn is distilled "
+            "into durable memories (facts, decisions, errors, preferences) and "
+            "chit-chat is dropped; set distil=false to store the raw text instead. "
+            "Distilling costs one model call per turn and takes a second or two. "
+            "Pass session_id to append to an existing conversation."
         ),
         "inputSchema": {
             "type": "object",
@@ -57,6 +60,11 @@ TOOLS: list[dict[str, Any]] = [
                     "type": "string",
                     "enum": ["user", "assistant", "system"],
                     "default": "user",
+                },
+                "distil": {
+                    "type": "boolean",
+                    "default": True,
+                    "description": "Distil into durable memories instead of storing verbatim.",
                 },
             },
             "required": ["content"],
@@ -176,11 +184,25 @@ class Server:
         role = _arg_str(args, "role") or "user"
         if role not in {"user", "assistant", "system"}:
             raise _ToolError(f"role must be user, assistant or system, got {role!r}")
+
+        # distil=True runs a model call and keeps only durable memories. It is
+        # the default because storing every turn is what fills a memory with
+        # near-duplicates; set distil=false to store the raw text verbatim.
+        distil = args.get("distil", True)
+        if not isinstance(distil, bool):
+            raise _ToolError("'distil' must be a boolean")
+
         try:
-            self.store.add(content, session_id=sid, role=role)
+            if distil:
+                ids = self.store.remember(content, session_id=sid, role=role)
+            else:
+                ids = [self.store.add(content, session_id=sid, role=role)]
         except ValueError as exc:  # empty, too long
             raise _ToolError(str(exc)) from exc
-        return _text(f"stored in session {sid}")
+
+        if not ids:
+            return _text(f"nothing durable in that turn -- not stored (session {sid})")
+        return _text(f"stored {len(ids)} memories in session {sid}")
 
     def _recall(self, args: dict[str, Any]) -> dict[str, Any]:
         query = _arg_str(args, "query") or ""

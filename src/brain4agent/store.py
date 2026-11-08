@@ -31,6 +31,7 @@ from functools import lru_cache
 from pathlib import Path
 
 from brain4agent.evidence import Evidence, JudgedResult, SearchResult, build_evidence
+from brain4agent.extract import Extractor
 from brain4agent.tokenize import BM25, both_tokens, jieba_tokens, load_jieba, tokenize
 
 
@@ -66,7 +67,11 @@ CREATE TABLE IF NOT EXISTS memories (
     role        TEXT NOT NULL,
     content     TEXT NOT NULL,
     created_at  TEXT NOT NULL,
-    tokens      TEXT NOT NULL DEFAULT ''
+    tokens      TEXT NOT NULL DEFAULT '',
+    kind        TEXT NOT NULL DEFAULT 'raw',
+    importance  REAL NOT NULL DEFAULT 0.5,
+    entities    TEXT NOT NULL DEFAULT '',
+    source_text TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
@@ -75,13 +80,22 @@ CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
 
 @dataclass(frozen=True, slots=True)
 class Memory:
-    """One stored turn."""
+    """One stored item.
+
+    ``content`` is what gets indexed and returned. For a raw turn it is the turn
+    itself; for an extracted memory it is the distilled sentence, with the
+    original turn kept in ``source_text`` for traceability.
+    """
 
     id: str
     session_id: str
     role: str
     content: str
     created_at: str
+    kind: str = "raw"
+    importance: float = 0.5
+    entities: tuple[str, ...] = ()
+    source_text: str | None = None
 
 
 def _now() -> str:
@@ -109,6 +123,7 @@ class MemoryStore:
         *,
         bm25_k1: float = 1.5,
         bm25_b: float = 0.75,
+        extractor: Extractor | None = None,
     ) -> None:
         self.path = Path(path)
         self._k1 = bm25_k1
@@ -127,6 +142,8 @@ class MemoryStore:
         # commit what the outer one is still accumulating.
         self._defer_depth = 0
         self._data_version = 0
+        self._extractor: Extractor | None = extractor
+        self._extractor_resolved = extractor is not None
         self._reload()
 
     @property
@@ -147,6 +164,16 @@ class MemoryStore:
         cols = {row[1] for row in db.execute("PRAGMA table_info(memories)")}
         if "tokens" not in cols:
             db.execute("ALTER TABLE memories ADD COLUMN tokens TEXT NOT NULL DEFAULT ''")
+        # Memory structure arrived later. Existing rows are raw turns with
+        # neutral importance, which is exactly what they are.
+        for column, ddl in (
+            ("kind", "ALTER TABLE memories ADD COLUMN kind TEXT NOT NULL DEFAULT 'raw'"),
+            ("importance", "ALTER TABLE memories ADD COLUMN importance REAL NOT NULL DEFAULT 0.5"),
+            ("entities", "ALTER TABLE memories ADD COLUMN entities TEXT NOT NULL DEFAULT ''"),
+            ("source_text", "ALTER TABLE memories ADD COLUMN source_text TEXT"),
+        ):
+            if column not in cols:
+                db.execute(ddl)
 
     def close(self) -> None:
         self._db.close()
@@ -163,7 +190,8 @@ class MemoryStore:
         # to return it in any order. rowid is the write order, which is the order
         # the caller meant.
         rows = self._db.execute(
-            "SELECT id, session_id, role, content, created_at, tokens FROM memories ORDER BY rowid"
+            "SELECT id, session_id, role, content, created_at, tokens,"
+            " kind, importance, entities, source_text FROM memories ORDER BY rowid"
         ).fetchall()
         self._by_session = {}
         self._session_text = {}
@@ -171,8 +199,18 @@ class MemoryStore:
         index_fn, query_fn = _cached_tokenizers()
         prepared: list[tuple[str, list[str]]] = []
 
-        for mid, sid, role, content, created, tokens in rows:
-            mem = Memory(id=mid, session_id=sid, role=role, content=content, created_at=created)
+        for mid, sid, role, content, created, tokens, kind, importance, entities, source in rows:
+            mem = Memory(
+                id=mid,
+                session_id=sid,
+                role=role,
+                content=content,
+                created_at=created,
+                kind=kind,
+                importance=importance,
+                entities=tuple(entities.split()) if entities else (),
+                source_text=source,
+            )
             self._by_session.setdefault(sid, []).append(mem)
             self._id_to_session[mid] = sid
             # Rows written before the tokens column existed get segmented once
@@ -222,6 +260,11 @@ class MemoryStore:
         session_id: str | None = None,
         role: str = "user",
         timestamp: str | None = None,
+        kind: str = "raw",
+        importance: float = 0.5,
+        entities: tuple[str, ...] | list[str] = (),
+        source_text: str | None = None,
+        index_source: bool = False,
     ) -> str:
         """Store one turn. Returns its id.
 
@@ -242,13 +285,30 @@ class MemoryStore:
         sid = session_id or self.new_session()
         ts = timestamp or _now()
         index_fn, _ = _cached_tokenizers()
-        tokens = " ".join(index_fn(text))
+        # index_source keeps the original turn in the matching index as well as
+        # in source_text. A distilled memory is easier to read but can wash out
+        # the words the question used; indexing both gives the query two ways in.
+        indexed = f"{text} {source_text}" if index_source and source_text else text
+        tokens = " ".join(index_fn(indexed))
 
         sql = (
-            "INSERT INTO memories (id, session_id, role, content, created_at, tokens)"
-            " VALUES (?, ?, ?, ?, ?, ?)"
+            "INSERT INTO memories"
+            " (id, session_id, role, content, created_at, tokens,"
+            " kind, importance, entities, source_text)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
-        params = (mid, sid, role, text, ts, tokens)
+        params = (
+            mid,
+            sid,
+            role,
+            text,
+            ts,
+            tokens,
+            kind,
+            max(0.0, min(1.0, importance)),
+            " ".join(entities),
+            source_text,
+        )
         if self._defer_commit:
             # Inside batch(): defer the fsync. A thousand individual commits is
             # most of the cost of a thousand writes.
@@ -257,7 +317,17 @@ class MemoryStore:
             with self._db:
                 self._db.execute(sql, params)
 
-        mem = Memory(id=mid, session_id=sid, role=role, content=text, created_at=ts)
+        mem = Memory(
+            id=mid,
+            session_id=sid,
+            role=role,
+            content=text,
+            created_at=ts,
+            kind=kind,
+            importance=max(0.0, min(1.0, importance)),
+            entities=tuple(entities),
+            source_text=source_text,
+        )
         self._by_session.setdefault(sid, []).append(mem)
         self._id_to_session[mid] = sid
         prev = self._session_text.get(sid)
@@ -266,6 +336,125 @@ class MemoryStore:
         # the whole index per turn.
         self._dirty = True
         return mid
+
+    def _resolve_extractor(self) -> Extractor | None:
+        """Look up the extractor once, from the environment.
+
+        Deferred rather than done in __init__ so constructing a store never
+        touches the ambient configuration. A caller that wants the model-free
+        path gets it by simply never calling remember().
+        """
+        if not self._extractor_resolved:
+            self._extractor = Extractor.from_env()
+            self._extractor_resolved = True
+        return self._extractor
+
+    def remember_exchange(
+        self,
+        user: str,
+        assistant: str,
+        *,
+        session_id: str | None = None,
+        extractor: Extractor | None = None,
+        index_source: bool = False,
+    ) -> list[str]:
+        """Distil a question and its answer together.
+
+        Preferred over ``remember(assistant)``: the question holds the vocabulary
+        a future search will use. Extracting answers alone was measured to drop
+        hit@1 from 0.925 to 0.475, because 63 of 127 turns -- almost every
+        question -- were judged "nothing durable" and thrown away (D-023).
+        """
+        question = user.strip()
+        answer = assistant.strip()
+        if not answer:
+            raise ValueError("empty answer")
+
+        ext = extractor if extractor is not None else self._resolve_extractor()
+        if ext is None:
+            sid = session_id or self.new_session()
+            return [
+                self.add(question, session_id=sid, role="user"),
+                self.add(answer, session_id=sid, role="assistant"),
+            ]
+
+        result = ext.extract(answer, question=question)
+        if not result.ok:
+            sid = session_id or self.new_session()
+            return [
+                self.add(question, session_id=sid, role="user"),
+                self.add(answer, session_id=sid, role="assistant"),
+            ]
+        if not result.memories:
+            return []
+
+        sid = session_id or self.new_session()
+        out: list[str] = []
+        for memory in result.memories:
+            out.append(
+                self.add(
+                    memory.content,
+                    session_id=sid,
+                    role="exchange",
+                    kind=memory.kind,
+                    importance=memory.importance,
+                    entities=memory.entities,
+                    source_text=f"Q: {question}\nA: {answer}",
+                    index_source=index_source,
+                )
+            )
+        return out
+
+    def remember(
+        self,
+        content: str,
+        *,
+        session_id: str | None = None,
+        role: str = "user",
+        extractor: Extractor | None = None,
+    ) -> list[str]:
+        """Store a turn by distilling it into durable memories.
+
+        Three outcomes, and the difference is the point:
+
+        - the extractor produced memories -> those are stored, each with the
+          original turn kept as ``source_text``
+        - the extractor ran and found nothing durable -> **nothing is stored**;
+          acknowledgements and restatements should not occupy the index
+        - the extractor failed or is not configured -> the raw turn is stored,
+          so an outage degrades quality rather than losing data
+
+        Returns the ids written, which may be empty.
+        """
+        text = content.strip()
+        if not text:
+            raise ValueError("empty content")
+
+        ext = extractor if extractor is not None else self._resolve_extractor()
+        if ext is None:
+            return [self.add(text, session_id=session_id, role=role)]
+
+        result = ext.extract(text)
+        if not result.ok:
+            return [self.add(text, session_id=session_id, role=role)]
+        if not result.memories:
+            return []
+
+        sid = session_id or self.new_session()
+        ids: list[str] = []
+        for memory in result.memories:
+            ids.append(
+                self.add(
+                    memory.content,
+                    session_id=sid,
+                    role=role,
+                    kind=memory.kind,
+                    importance=memory.importance,
+                    entities=memory.entities,
+                    source_text=text,
+                )
+            )
+        return ids
 
     @contextmanager
     def batch(self) -> Iterator[MemoryStore]:
@@ -455,6 +644,18 @@ class MemoryStore:
         querying.
         """
         self._reload()
+
+    def _by_session_memory(self, memory_id: str) -> Memory | None:
+        """Look up one memory by id across all sessions.
+
+        Linear, and only used by the CLI to pretty-print what it just wrote;
+        anything on a hot path should use the index instead.
+        """
+        for turns in self._by_session.values():
+            for mem in turns:
+                if mem.id == memory_id:
+                    return mem
+        return None
 
     def session(self, session_id: str) -> list[Memory]:
         """Turns in the session, in the order they were written.

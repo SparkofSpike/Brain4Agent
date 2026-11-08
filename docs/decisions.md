@@ -1113,3 +1113,83 @@ order. If retention ever matters in practice, counting retrievals and keeping
 what is used would be the first improvement. It is not built because there is no
 evidence yet that it would help, and this project's rule is that a heuristic
 needs a number.
+
+## D-023 Distillation improves recall and damages top-1 precision
+
+**Date:** 2026-11-08
+**Status:** Measured; distillation is optional, not the default
+
+**Context**
+
+D-020 showed that storing every turn creates near-duplicate noise. The obvious
+fix is to store distilled facts instead — that is what neural-memory does with
+fibers, and what `remember()` now does with a hosted model.
+
+Does it actually retrieve better?
+
+**Three stores, one extraction pass**
+
+Same 40 Chinese questions, same corpus. Extraction ran once; the fact-only and
+fact+source stores were built from the same 103 memories so the model was not
+called twice.
+
+| store | records | hit@1 | hit@5 | hit@10 | MRR |
+|---|---|---|---|---|---|
+| raw turns | 127 | **0.9250** | 0.9750 | 1.0000 | **0.9404** |
+| facts only | 103 | 0.7000 | 0.9750 | 1.0000 | 0.8238 |
+| facts + source indexed | 103 | 0.7750 | **1.0000** | 1.0000 | 0.8771 |
+
+`remember()` alone, extracting single turns, scored 0.4750 — see below.
+
+**Finding 1: extracting answers without their questions halves the score**
+
+127 turns produced 63 empty results, and almost every one was a *question*.
+Questions look like "根因在哪个文件" — nothing durable to a model reading them
+in isolation — but they contain exactly the words a future search will use.
+Dropping them dropped hit@1 from 0.9250 to 0.4750.
+
+`remember_exchange()` fixes this by distilling the pair: the question supplies
+the vocabulary, the answer supplies the content. 0.4750 → 0.7250.
+
+**Finding 2: distilled facts compete with each other**
+
+Even paired, distilled facts score lower on top-1 while matching raw turns on
+hit@10. Indexing the original text alongside the distilled sentence recovers
+some of it (0.7000 → 0.7750) but not all.
+
+The mechanism is the same one from D-020. Every fact is a clean, topic-focused
+sentence, so 103 facts share far more vocabulary than 127 turns did. Common
+terms gain frequency and lose IDF, and the first result becomes a coin flip
+between several memories that are all "about" the question.
+
+**What distillation is actually good for**
+
+- **Recall.** hit@10 is 1.0 and hit@5 is 1.0 with source indexing: the answer is
+  always in the first five. What suffers is only the ordering.
+- **Reading.** "extraction/keywords.py 第 443 行的正则不含汉字范围" is a better
+  thing to hand an agent than a four-turn transcript.
+- **Discarding.** 63 exchanges distilled into 103 memories instead of 127 turns,
+  and chit-chat is dropped rather than stored.
+
+**What it is not good for**
+
+Top-1 precision, which is what a caller reading one result consumes.
+
+**Decision**
+
+- `add()` stays the default for benchmarking: raw turns, hit@1 0.9250.
+- `remember()` / `remember_exchange()` are opt-in, and `index_source=True` is
+  the better configuration when using them.
+- The MCP tool defaults to `distil=true` because a real agent's memory is not a
+  benchmark corpus — chit-chat filtering matters more there than 0.15 of hit@1
+  on a 40-question set.
+
+**What this says about "better than neural-memory"**
+
+Distillation alone does not get there. nmem retrieves through a graph
+(spreading activation, causal traversal), which is how it can afford to store
+clean facts: the graph supplies the discrimination that word matching loses.
+Storing facts and searching them with BM25 gets the worst of both — the noise
+reduction of distillation and the ranking power of a bag of words.
+
+The next piece is the graph. That is now the measured gap, not a guess.

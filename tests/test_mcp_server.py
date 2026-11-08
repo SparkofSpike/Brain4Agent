@@ -70,7 +70,7 @@ class TestHandshake:
 class TestTools:
     def test_remember_returns_session(self, server: Server) -> None:
         out = call(server, "b4a_remember", {"content": "中文查询搜不到记忆"})
-        assert "stored in session" in text_of(out)
+        assert "stored" in text_of(out) and "session" in text_of(out)
         assert out["result"]["isError"] is False
 
     def test_remember_empty_content(self, server: Server) -> None:
