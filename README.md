@@ -69,7 +69,7 @@ user: 中文查询搜不到记忆，recall 返回空
 assistant: 根因在 keywords.py 第 443 行，正则不含汉字范围
 ```
 
-Now a question the store cannot answer:
+A question the store cannot answer:
 
 ```bash
 $ brain4agent search "杭州测试机上装的是什么数据库" -k 1
@@ -90,9 +90,6 @@ imported 4 turns across 2 sessions
 {"session_id": "s1", "role": "user", "content": "中文查询搜不到记忆"}
 {"session_id": "s1", "role": "assistant", "content": "根因在 keywords.py 第 443 行"}
 ```
-
-The `corpus has no:` line is the point. It does not mean "not found" — it means
-the store has never seen that word anywhere.
 
 ### MCP server
 
@@ -140,6 +137,14 @@ with MemoryStore("brain.db") as store:
 is session-level, not turn-level: an answer often spans an exchange, and judging
 single turns produces far more false negatives.
 
+Bulk imports go through `batch()`, which defers the commit to one per group:
+
+```python
+with store.batch():
+    for turn in turns:
+        store.add(turn.text, session_id=turn.sid, role=turn.role)
+```
+
 ### Optional hosted judge
 
 Off by default. Enabled only when a key is present.
@@ -182,9 +187,9 @@ One SQLite file. Rows are turns; the unit of retrieval is the session. Index
 tokens are computed at write time and cached in a column, so rebuilding the
 in-memory index is a counting exercise rather than a re-segmentation.
 
-Writes commit in batches. `with store.batch():` defers the commit to one per
-group, which took a 1,016-turn import from 3.8 s to 0.25 s -- a thousand
-individual commits costs more than the thousand writes.
+Writes commit in batches. A 1,016-turn import took 3.8 s one commit at a time
+and 0.25 s inside `batch()` — a thousand individual commits costs more than the
+thousand writes.
 
 ```
                        import    rebuild   query
@@ -262,9 +267,11 @@ segmentation.
 
 hit@10 is saturated; only hit@1 and MRR discriminate.
 
-**This number describes 44 sessions, and it does not survive dense
-near-duplicates.** Adding 300 noise sessions that share the topic but state a
-different fact drops hit@1 to zero:
+### Where that number stops holding
+
+**0.925 describes 44 sessions. It does not survive dense near-duplicates.**
+Adding 300 noise sessions that share the topic but state a different fact drops
+hit@1 to zero:
 
 | corpus | hit@1 | hit@5 |
 |---|---|---|
@@ -272,18 +279,35 @@ different fact drops hit@1 to zero:
 | +300 same-topic sessions | 0.000 | 0.000 |
 
 The mechanism is literal matching. Asked *"which file and line is the root cause
-in"*, a session saying keywords.py line 443 does not contain 文件 or 行, while
-one saying looked at some file, some line contains both. The vague non-answer
-outranks the precise answer.
+in"*, a session saying `keywords.py line 443` contains 根因 but neither 文件 nor
+行, while one saying `looked at some file, some line` contains all three. The
+vague non-answer outranks the precise answer.
 
-Three fixes were measured and rejected: BM25 length normalisation (no effect),
-recency tie-break (cost 0.25 on the clean corpus), and a concreteness bonus for
-IPs and paths (recovered one question, cost 0.025). See
-[D-020](docs/decisions.md#d-020-bag-of-words-retrieval-degrades-on-dense-same-topic-corpora).
+Supplying the missing literals does not fix it, and that was measured too. An
+oracle query — the question plus the gold session's own file names, line numbers
+and commit hashes — recovers 15% of the set:
 
-Practical consequence: read the top five, weight corpus_missing over raw score,
-and give the query enough context to disambiguate. The system returns evidence
-rather than a verdict for exactly this reason.
+| query | hit@1 |
+|---|---|
+| question only | 0.000 |
+| + 3 oracle entities | 0.150 |
+
+Two reasons it stays low. **23 of the 40 answers contain no concrete token at
+all** ("did the downstream components need changes?" — answered "no"), so there
+is nothing to supply. And of the 17 that do, BM25 still ranks the right session
+first less than half the time.
+
+Four fixes were measured and rejected: BM25 length normalisation (no effect),
+recency tie-break (cost 0.25 on the clean corpus), a concreteness bonus
+(recovered one question, cost 0.025), and oracle entity injection. See
+[D-020](docs/decisions.md#d-020-bag-of-words-retrieval-degrades-on-dense-same-topic-corpora)
+and [D-021](docs/decisions.md#d-021-oracle-entities-recover-15-the-failure-is-not-missing-literals).
+
+Practical consequence: BM25 is adequate when a topic appears once or twice in the
+corpus, and degrades in proportion to near-duplicates. Read the top five, weight
+`corpus_missing` over raw score, and have the caller name the specific instance —
+"the keywords.py fix", not "the fix". That is why the system returns evidence
+rather than a verdict, from three independent measurements.
 
 ### Abstention
 
@@ -318,16 +342,21 @@ judgement the calling agent could make while it is already reasoning.
 ## Status
 
 Stage 0 (evaluation) and Stage 1 (core implementation) are complete: library,
-CLI, and MCP server.
+CLI, MCP server.
 
 Not built: PyPI release, cross-session aggregation, forgetting. The
 [decision log](docs/decisions.md) records what was rejected and why; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the surrounding field.
 
+The known limits are measured, not rhetorical: retrieval degrades on dense
+near-duplicates (D-020), and no query-side trick recovers it (D-021). Both are
+consequences of matching words rather than meanings, and the architecture is
+built around that rather than pretending otherwise.
+
 ## Design decisions
 
-Nineteen decisions, each with the measurement or reasoning behind it, in
+Twenty-one decisions, each with the measurement or reasoning behind it, in
 [`docs/decisions.md`](docs/decisions.md). Both directions are recorded —
 including the hypotheses that were tested and failed.
 

@@ -966,3 +966,94 @@ Semantic matching — which means a model, which the core path does not have. Th
 available options are therefore: accept the limit, or let the calling agent supply
 context (the current conversation) so the query carries enough signal to
 disambiguate. The second is cheap and belongs in the caller, not here.
+
+## D-021 Oracle entities recover 15%: the failure is not missing literals
+
+**Date:** 2026-11-08
+**Status:** Measured, closes the line of enquiry
+
+**Context**
+
+D-020 showed hit@1 collapsing under same-topic noise and diagnosed it as literal
+matching: a vague non-answer repeats the question's words, while a precise answer
+contains file names and line numbers the question never mentions.
+
+If that diagnosis is right, adding the missing detail to the query should help.
+This measures how much, and whether the ceiling is worth chasing.
+
+**Experiment**
+
+`bench/zh/context_probe.py`. The query is extended with concrete entities taken
+straight from the gold session — file names, line references, IPs, paths, commit
+hashes — at three depths. This is an **oracle**: a user could not type it without
+already knowing the answer. It is an upper bound, not a feature.
+
+300 noise sessions, written first.
+
+| query | hit@1 | hit@5 | MRR |
+|---|---|---|---|
+| plain | 0.0000 | 0.0000 | 0.0844 |
+| + 1 entity | 0.0500 | 0.0500 | 0.1344 |
+| + 3 entities | 0.1500 | 0.1500 | 0.2344 |
+| + all entities | 0.1500 | 0.1500 | 0.2344 |
+
+**Finding 1: over half the questions have nothing to extract**
+
+23 of 40 answers contain no concrete token at all.
+
+- "Did the downstream components need changes?" — answered "no".
+- "What did the first fix get wrong?" — answered with a paragraph about
+  character-splitting destroying common words.
+
+There is no file name, no address, no number. The oracle has no lever for 57.5%
+of the set, so 0.425 is the arithmetic ceiling before anything is measured.
+
+**Finding 2: even with entities, the oracle recovers 6 of 17**
+
+Knowing the exact file name and line number, BM25 still puts the right session
+first less than half the time.
+
+**A bug that had to be fixed first**
+
+The first run reported 0.10. The cause was not retrieval: `substitute_same_answer`
+replaced four patterns and left commit hashes untouched, so seven variants shared
+`4a29ae6` with the original and tied with it honestly. The gold session sat at
+rank 8 behind them. Fixing the substitution moved hit@1 to 0.15 — a real
+improvement, and still nowhere near recovery.
+
+Worth recording because the same trap applies to any future noise experiment: a
+variant that shares one un-substituted token makes the result look like a
+retrieval failure when it is a fixture failure.
+
+**Conclusion**
+
+The D-020 diagnosis was correct and incomplete. Literal matching explains the
+failure; supplying the missing literals does not fix it. What remains is the part
+of the question with no literal form — *which* of several similar facts the user
+means.
+
+That is semantic resolution, and the core path has no model. The honest position:
+
+- BM25 is adequate when each topic appears once or twice in the corpus.
+- It degrades in proportion to how many near-duplicate memories share a topic.
+- No query-side trick recovers it, because the query is not what is missing.
+
+**Why this is D-011 for the third time**
+
+The project has now arrived at "push the judgement to the caller" from three
+independent directions:
+
+- D-008: scores cannot express abstention.
+- D-012: QPP predicts ranking quality, not answer presence.
+- D-021: retrieval cannot express which instance the user means.
+
+Each was a different question, each measured, each landing on the same boundary.
+The architecture is not a preference; it is where three separate measurements
+converge.
+
+**What actually helps**
+
+Not retrieval. Either the calling agent supplies enough context that the question
+names the specific instance — "the keywords.py fix" rather than "the fix" — or
+the system returns top-k and the caller disambiguates. Both put the judgement
+where a model already exists.
