@@ -1550,3 +1550,60 @@ address) it separates correctly: 5 bits apart for a one-character edit, 30 bits
 apart for a different topic. Whether that holds across the real corpus, and
 whether 10 is the right cut, is unmeasured. Until then `possible_duplicates` is a
 hint, and the README says so.
+---
+
+## D-029 Weight: reinforcement, decay, and pruning on evidence
+
+**Context.** D-028 counted accesses and explicitly did nothing with them. The
+user's objection was fair: a counter that never affects anything is bookkeeping,
+not memory. A weight is what makes the count and the decay mean something.
+
+**Decision.** A `weight` column in [0, 1], initialised to `importance`.
+
+- `reinforce(id, delta=0.03)` raises it, capped at 1.0.
+- `decay(factor=0.95, floor=0.0)` multiplies every weight, explicitly, when the
+  caller asks.
+- `prune_by_weight(floor=0.05, dry_run=False)` deletes what has fallen below.
+- `search(weight_blend=0.0)` optionally mixes weight into ranking.
+
+**The four defaults that keep this from being a regression.**
+
+1. **`weight_blend=0.0` by default.** BM25 is untouched. Every published number
+   on this page was measured with that default, and a corpus that never calls
+   `reinforce()` scores exactly as it did before the column existed.
+2. **Weight 0.5 is neutral.** At blend 1.0 a memory still at the default keeps its
+   score exactly; below 0.5 shrinks, above grows. So even a caller who turns the
+   blend on gets no change until something is actually reinforced.
+3. **`decay` is explicit, not scheduled.** A time-based decay has to decide what
+   "age" means for a memory written once and read fifty times. Nothing here
+   measures which answer is right, so the store does not pretend to know: the
+   caller runs it weekly, after a sprint, or never.
+4. **Pruning has a test, and it has no default floor.** `prune_by_weight()`
+   requires the caller to name a threshold, and `dry_run=True` reports the count
+   first. Deleting memories is irreversible.
+
+**Why pruning by weight matters more than ranking by weight.** D-022 measured
+that `prune(keep_sessions=N)` needs to delete 95% of a noisy corpus before
+retrieval recovers — that is emptying, not forgetting, because write order says
+nothing about usefulness. Weight is the first signal in this project that
+distinguishes a memory worth keeping from one worth dropping on grounds other
+than age: **one that is retrieved survives, one that is never retrieved decays
+away.** That is a real answer to "what should be forgotten", and it is the first
+one here that is not a heuristic about time.
+
+**Why ranking by weight stays opt-in.** The mechanism works — a memory reinforced
+five times outranks its twin at `weight_blend=1.0`, and I have the test to prove
+it. But working is not the same as helping. Nothing here has measured whether
+real retrieval patterns correlate with what should rank first, and letting an
+unmeasured signal reorder results would be exactly the kind of unverified change
+this project keeps refusing to make.
+
+**Measured.** All three benchmarks unchanged at default settings:
+PrecisionMemBench 64/77 and 34/43, LoCoMo hit@1 0.6270, Chinese 0.9250. That is
+the intended outcome and also the limit of the claim — **no benchmark tests
+whether the weight is useful, only that adding it broke nothing.**
+
+**The honest gap.** The weight mechanics are verified; the weight *value* is not.
+A recommendation to actually use `prune_by_weight` would need a corpus where some
+memories are genuinely dead and some are genuinely alive, and a measurement that
+the surviving set still answers the questions. That experiment has not been run.

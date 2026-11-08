@@ -79,7 +79,8 @@ CREATE TABLE IF NOT EXISTS memories (
     superseded_by TEXT,
     refs        TEXT NOT NULL DEFAULT '',
     fingerprint INTEGER NOT NULL DEFAULT 0,
-    accesses    INTEGER NOT NULL DEFAULT 0
+    accesses    INTEGER NOT NULL DEFAULT 0,
+    weight      REAL NOT NULL DEFAULT 0.5
 );
 CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
@@ -124,6 +125,10 @@ class Memory:
     # How many times a search has returned this memory. Recorded, not yet used for
     # ranking -- reinforcement needs evidence first, and there is none yet.
     accesses: int = 0
+    # Reinforcement weight, 0..1. Starts at `importance`, rises a little each time
+    # the memory is retrieved, falls when decay() runs. Retrieval does not use it
+    # unless a caller passes `weight_blend`; the default path is unchanged.
+    weight: float = 0.5
 
 
 def _now() -> str:
@@ -209,6 +214,7 @@ class MemoryStore:
                 "ALTER TABLE memories ADD COLUMN fingerprint INTEGER NOT NULL DEFAULT 0",
             ),
             ("accesses", "ALTER TABLE memories ADD COLUMN accesses INTEGER NOT NULL DEFAULT 0"),
+            ("weight", "ALTER TABLE memories ADD COLUMN weight REAL NOT NULL DEFAULT 0.5"),
         ):
             if column not in cols:
                 db.execute(ddl)
@@ -230,7 +236,7 @@ class MemoryStore:
         rows = self._db.execute(
             "SELECT id, session_id, role, content, created_at, tokens,"
             " kind, importance, entities, source_text, tags, superseded_by, refs,"
-            " fingerprint, accesses"
+            " fingerprint, accesses, weight"
             " FROM memories ORDER BY rowid"
         ).fetchall()
         self._by_session = {}
@@ -256,6 +262,7 @@ class MemoryStore:
             refs,
             fingerprint,
             accesses,
+            weight,
         ) in rows:
             mem = Memory(
                 id=mid,
@@ -272,6 +279,7 @@ class MemoryStore:
                 refs=tuple(refs.split()) if refs else (),
                 fingerprint=fingerprint & ((1 << 64) - 1),
                 accesses=accesses,
+                weight=weight,
             )
             self._by_session.setdefault(sid, []).append(mem)
             self._id_to_session[mid] = sid
@@ -389,13 +397,14 @@ class MemoryStore:
         # is unchanged.
         fp = simhash_of(text)
         fp_signed = fp - (1 << 64) if fp >= 1 << 63 else fp
+        clamped_importance = max(0.0, min(1.0, importance))
 
         sql = (
             "INSERT INTO memories"
             " (id, session_id, role, content, created_at, tokens,"
             " kind, importance, entities, source_text, tags, superseded_by, refs,"
-            " fingerprint, accesses)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " fingerprint, accesses, weight)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             mid,
@@ -413,6 +422,7 @@ class MemoryStore:
             " ".join(refs),
             fp_signed,
             0,
+            clamped_importance,
         )
         if self._defer_commit:
             # Inside batch(): defer the fsync. A thousand individual commits is
@@ -429,7 +439,7 @@ class MemoryStore:
             content=text,
             created_at=ts,
             kind=kind,
-            importance=max(0.0, min(1.0, importance)),
+            importance=clamped_importance,
             entities=tuple(entities),
             source_text=source_text,
             tags=tuple(t.strip() for t in tags if t.strip()),
@@ -437,6 +447,7 @@ class MemoryStore:
             refs=tuple(refs),
             fingerprint=fp,
             accesses=0,
+            weight=clamped_importance,
         )
         self._by_session.setdefault(sid, []).append(mem)
         self._id_to_session[mid] = sid
@@ -613,6 +624,66 @@ class MemoryStore:
         self.add(assistant, session_id=sid, role="assistant", timestamp=ts)
         return sid
 
+    def reinforce(self, memory_id: str, *, delta: float = 0.03) -> float | None:
+        """Raise a memory's weight a little. Returns the new weight, or None.
+
+        This is what `accesses` is for. Counting retrievals without letting them
+        affect anything is bookkeeping; reinforcement is the point of the count,
+        and pruning is the point of the weight.
+
+        Capped at 1.0. A memory retrieved a thousand times is not ten times more
+        relevant than one retrieved a hundred times, and unbounded growth would
+        make the number impossible to interpret later.
+        """
+        self._ensure_fresh()
+        mem = self._by_id.get(memory_id)
+        if mem is None:
+            return None
+        new_weight = min(1.0, mem.weight + delta)
+        with self._db:
+            self._db.execute("UPDATE memories SET weight = ? WHERE id = ?", (new_weight, memory_id))
+        self._by_id[memory_id] = dc_replace(mem, weight=new_weight)
+        return new_weight
+
+    def decay(self, *, factor: float = 0.95, floor: float = 0.0) -> int:
+        """Multiply every weight by ``factor``. Returns how many rows changed.
+
+        Explicit, not time-based. A time-based decay has to decide what "age"
+        means for a memory written once and read fifty times, and nothing here
+        measures which answer is right. An explicit pass the caller schedules is
+        honest about not knowing: run it weekly, after a sprint, or never.
+
+        ``floor`` clamps the result so repeated passes cannot drive the whole
+        corpus to zero and leave nothing worth keeping.
+        """
+        if not 0.0 < factor <= 1.0:
+            raise ValueError(f"factor must be in (0, 1], got {factor}")
+        self._ensure_fresh()
+        changed = 0
+        with self._db:
+            for mid, mem in self._by_id.items():
+                new_weight = max(floor, mem.weight * factor)
+                if new_weight != mem.weight:
+                    self._db.execute(
+                        "UPDATE memories SET weight = ? WHERE id = ?", (new_weight, mid)
+                    )
+                    changed += 1
+        if changed:
+            self._refresh_weights()
+        return changed
+
+    def _refresh_weights(self) -> None:
+        """Re-read weights into memory without rebuilding the search index.
+
+        A weight change touches no token, so the index is still valid; only the
+        cached Memory objects need the new number.
+        """
+        rows = self._db.execute("SELECT id, weight FROM memories").fetchall()
+        for mid, weight in rows:
+            mem = self._by_id.get(mid)
+            if mem is not None and mem.weight != weight:
+                self._by_id[mid] = dc_replace(mem, weight=weight)
+
     def prune(self, *, keep_sessions: int) -> int:
         """Delete the oldest sessions until at most `keep_sessions` remain.
 
@@ -641,6 +712,31 @@ class MemoryStore:
             self._db.executemany("DELETE FROM memories WHERE session_id = ?", [(s,) for s in drop])
         self._reload()
         return len(drop)
+
+    def prune_by_weight(self, *, floor: float = 0.05, dry_run: bool = False) -> int:
+        """Delete memories whose weight has fallen below ``floor``.
+
+        The counterpart to ``decay``. ``prune(keep_sessions=N)`` forgets by write
+        order, which D-022 measured as useless on a noisy corpus: it needs to
+        delete 95% of everything before retrieval recovers, which is emptying
+        rather than forgetting. This forgets by evidence instead -- a memory that
+        was never retrieved and has decayed repeatedly is the one worth dropping,
+        and one that keeps being retrieved never reaches the floor.
+
+        ``dry_run`` reports the count without deleting. Deleting is irreversible
+        and this is the kind of operation that should be looked at once before it
+        runs.
+
+        Returns the number of memories (not sessions) removed or that would be.
+        """
+        self._ensure_fresh()
+        victims = [mid for mid, mem in self._by_id.items() if mem.weight < floor]
+        if dry_run or not victims:
+            return len(victims)
+        with self._db:
+            self._db.executemany("DELETE FROM memories WHERE id = ?", [(m,) for m in victims])
+        self._reload()
+        return len(victims)
 
     def forget_session(self, session_id: str) -> int:
         """Delete a session. Returns how many turns were removed."""
@@ -677,6 +773,7 @@ class MemoryStore:
         kinds: Sequence[str] | None = None,
         include_superseded: bool = False,
         expand_refs: bool = False,
+        weight_blend: float = 0.0,
     ) -> SearchResult:
         """Retrieve sessions and report the checks that need no model.
 
@@ -692,6 +789,12 @@ class MemoryStore:
         ``expand_refs`` appends the memories a hit points at. Off by default: it
         trades precision for completeness, and the caller is the only one who
         knows which they need right now.
+
+        ``weight_blend`` mixes reinforcement weight into the ranking. 0.0 leaves
+        BM25 untouched, which is the default and what every published number was
+        measured with. 1.0 scales each score by the memory's weight relative to
+        0.5. Intermediate values interpolate. It is opt-in because nothing here
+        has measured that weight helps ranking -- only that pruning can use it.
         """
         if top_k < 1:
             raise ValueError(f"top_k must be at least 1, got {top_k}")
@@ -742,6 +845,7 @@ class MemoryStore:
                 )
             )
 
+        hits = self._blend_weights(hits, weight_blend)
         return self._annotate(
             build_evidence(
                 query=query,
@@ -779,6 +883,29 @@ class MemoryStore:
                 continue
             if near_duplicate(mem.fingerprint, other.fingerprint, threshold):
                 out.append(other.id)
+        return out
+
+    def _blend_weights(
+        self, hits: list[tuple[str, float]], weight_blend: float
+    ) -> list[tuple[str, float]]:
+        """Scale BM25 scores by reinforcement weight. No-op at 0.0.
+
+        Weight 0.5 is neutral: a memory at the default weight keeps its score
+        exactly. Below 0.5 shrinks, above 0.5 grows. That makes the parameter
+        interpretable -- 0.5 is "do nothing" -- and means a corpus that never
+        called reinforce() is unaffected even at blend 1.0.
+        """
+        if weight_blend <= 0.0:
+            return hits
+        out: list[tuple[str, float]] = []
+        for mid, score in hits:
+            mem = self._by_id.get(mid)
+            if mem is None:
+                out.append((mid, score))
+                continue
+            factor = 1.0 + weight_blend * (mem.weight / 0.5 - 1.0)
+            out.append((mid, score * max(0.0, factor)))
+        out.sort(key=lambda kv: -kv[1])
         return out
 
     def _annotate(self, result: SearchResult) -> SearchResult:
