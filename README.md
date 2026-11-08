@@ -241,6 +241,29 @@ segmentation.
 
 hit@10 is saturated; only hit@1 and MRR discriminate.
 
+**This number describes 44 sessions, and it does not survive dense
+near-duplicates.** Adding 300 noise sessions that share the topic but state a
+different fact drops hit@1 to zero:
+
+| corpus | hit@1 | hit@5 |
+|---|---|---|
+| 44 sessions | 0.925 | 0.975 |
+| +300 same-topic sessions | 0.000 | 0.000 |
+
+The mechanism is literal matching. Asked *"which file and line is the root cause
+in"*, a session saying keywords.py line 443 does not contain 文件 or 行, while
+one saying looked at some file, some line contains both. The vague non-answer
+outranks the precise answer.
+
+Three fixes were measured and rejected: BM25 length normalisation (no effect),
+recency tie-break (cost 0.25 on the clean corpus), and a concreteness bonus for
+IPs and paths (recovered one question, cost 0.025). See
+[D-020](docs/decisions.md#d-020-bag-of-words-retrieval-degrades-on-dense-same-topic-corpora).
+
+Practical consequence: read the top five, weight corpus_missing over raw score,
+and give the query enough context to disambiguate. The system returns evidence
+rather than a verdict for exactly this reason.
+
 ### Abstention
 
 At the natural operating point of `corpus_missing`:

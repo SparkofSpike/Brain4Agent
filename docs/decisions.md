@@ -878,3 +878,91 @@ The single temporal-reasoning question (zh032, "which came first — the first f
 or the limit adjustment?") fell from rank 1 to rank 4. BM25 is a bag of words and
 has never understood ordering; the earlier rank-1 hit was luck. hit@10 remains
 1.0 and the net gain elsewhere is larger.
+
+## D-020 Bag-of-words retrieval degrades on dense same-topic corpora
+
+**Date:** 2026-11-08
+**Status:** Measured, no fix adopted
+
+**Context**
+
+Every benchmark number in this project comes from 44 sessions. A working agent
+accumulates thousands. If hit@1 decays with corpus size, the benchmarks describe
+a toy.
+
+**Experiment**
+
+`bench/zh/scale_probe.py` adds noise sessions at 100 / 300 / 1000 depth. Two
+kinds, because they ask different questions:
+
+- **same-answer** — same topic, different fact. The variant says "the root cause
+  is tokenizer.py line 512"; the original says "keywords.py line 443". Both
+  answer the question and they disagree. This is the common case in a real
+  library: three deployments, each with a correct address.
+- **unanswered** — same vocabulary, no answer. The variant says "looked at some
+  file, some line". A true negative.
+
+Noise is written first, so originals cannot win ties for free.
+
+**Results**
+
+| corpus | hit@1 | hit@5 | MRR |
+|---|---|---|---|
+| 44 (clean) | 0.9250 | 0.9750 | 0.9404 |
+| +300 same-answer | 0.0000 | 0.0000 | 0.0844 |
+| +1000 same-answer | 0.0000 | 0.0000 | 0.0000 |
+| +300 unanswered | 0.0000 | 0.0000 | 0.0844 |
+
+With the original sessions written first instead, hit@1 returns to 0.9250 at
+every noise level. The score is identical; only insertion order decides.
+
+**Why**
+
+BM25 matches literal terms. Asked *"which file and line is the root cause in"*:
+
+- the session saying `root cause is keywords.py line 443` contains 根因 but
+  neither 文件 nor 行
+- the session saying `looked at some file, some line` contains 根因, 文件, and 行
+
+The vague non-answer matches the question better than the precise answer does.
+This is not an implementation defect; it is what a bag of words does.
+
+**Three candidate fixes, all measured, all rejected**
+
+| fix | noisy hit@1 | clean hit@1 | verdict |
+|---|---|---|---|
+| BM25 `b` ∈ {0, 0.3, 0.75, 1.0} | 0.0000 | — | no effect |
+| recency tie-break (newest first) | 0.0000 | 0.6750 | damages the normal case |
+| concreteness bonus (IP/path/file/line) at α=0.5 | 0.0250 | 0.9000 | recovers 1 of 40, costs 0.025 |
+
+The `b` sweep rules out length normalisation: `b=0` does not help a shorter
+non-answer, so document length is not the mechanism.
+
+The concreteness bonus was the most promising idea — real answers carry paths,
+file names and line numbers; talk about a question does not. It recovers exactly
+one question and costs more than it gains. Rejected.
+
+**What this means**
+
+- **0.9250 hit@1 is real but optimistic.** It describes a 44-session corpus with
+  no dense near-duplicates. It is not a claim about a year of accumulated memory.
+- **real deployments will see lower hit@1**, in proportion to how many similar
+  memories share a topic.
+- **readers should use top-5 and `corpus_missing`**, not top-1. hit@5 survived
+  the same-answer noise at 100 depth and collapsed at 300, which is the honest
+  shape of the limit.
+- **it confirms D-011.** The memory system cannot judge relevance. A heuristic
+  standing in for that judgement does not work either, and this is now measured
+  rather than assumed.
+
+**Not fixed**
+
+No product change. Every candidate fix made the normal case worse. Stating the
+limit is more useful than shipping a heuristic that hides it.
+
+**What would actually help**
+
+Semantic matching — which means a model, which the core path does not have. The
+available options are therefore: accept the limit, or let the calling agent supply
+context (the current conversation) so the query carries enough signal to
+disambiguate. The second is cheap and belongs in the caller, not here.

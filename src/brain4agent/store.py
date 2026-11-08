@@ -97,8 +97,16 @@ class MemoryStore:
             print(e.memory.content, e.coverage, e.missing_terms)
     """
 
-    def __init__(self, path: str | Path = "brain.db") -> None:
+    def __init__(
+        self,
+        path: str | Path = "brain.db",
+        *,
+        bm25_k1: float = 1.5,
+        bm25_b: float = 0.75,
+    ) -> None:
         self.path = Path(path)
+        self._k1 = bm25_k1
+        self._b = bm25_b
         self.path.parent.mkdir(parents=True, exist_ok=True)
         self._db = sqlite3.connect(str(self.path))
         self._db.executescript(SCHEMA)
@@ -162,7 +170,7 @@ class MemoryStore:
         for sid, turns in self._by_session.items():
             self._session_text[sid] = "\n".join(m.content.lower() for m in turns)
 
-        self._index = BM25(index_fn=index_fn, query_fn=query_fn)
+        self._index = BM25(k1=self._k1, b=self._b, index_fn=index_fn, query_fn=query_fn)
         self._index.index_tokens(prepared)
         self._dirty = False
 
