@@ -1057,3 +1057,59 @@ Not retrieval. Either the calling agent supplies enough context that the questio
 names the specific instance — "the keywords.py fix" rather than "the fix" — or
 the system returns top-k and the caller disambiguates. Both put the judgement
 where a model already exists.
+
+## D-022 Forgetting is storage management, not a retrieval fix
+
+**Date:** 2026-11-08
+**Status:** Implemented, measured, limits stated
+
+**Context**
+
+The README claimed forgetting was part of the design — "a memory store that only
+grows degrades" — and no code implemented it. That is the kind of gap that turns
+documentation into marketing.
+
+**Decision**
+
+`prune(keep_sessions=N)` deletes the oldest sessions by write order. Exposed as
+`brain4agent prune --keep N`. Retention is by recency, on the assumption that a
+user's recent work is what they ask about.
+
+**Measurement: does forgetting fix D-020?**
+
+1,044 sessions — 1,000 same-topic noise written first, the 44 originals last —
+then pruned progressively:
+
+| keep | removed | hit@1 | hit@5 |
+|---|---|---|---|
+| 1000 | 44 | 0.000 | 0.000 |
+| 500 | 500 | 0.000 | 0.000 |
+| 200 | 300 | 0.000 | 0.650 |
+| 100 | 100 | 0.000 | 0.950 |
+| 50 | 50 | 0.775 | 0.950 |
+
+**Recovery requires deleting 95% of the store.** At keep=50 only the 44 originals
+plus six noise sessions remain. That is not forgetting; that is emptying.
+
+Even then hit@1 is 0.775 rather than the original 0.925, because six near-duplicate
+sessions still win two questions.
+
+**Conclusion**
+
+Forgetting controls size and cost. It does not make a corpus of near-duplicates
+retrievable — the duplicates are the problem, and a recency policy keeps exactly
+the recent ones, which in a real library is exactly the noise.
+
+**What it is good for**
+
+- Bounding disk and memory for a long-running agent.
+- Dropping sessions a user has moved past.
+- Not a substitute for semantic matching (D-021).
+
+**The obvious next step, not taken**
+
+There is no access counter and no importance score; retention is pure write
+order. If retention ever matters in practice, counting retrievals and keeping
+what is used would be the first improvement. It is not built because there is no
+evidence yet that it would help, and this project's rule is that a heuristic
+needs a number.

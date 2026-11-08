@@ -149,10 +149,7 @@ def main() -> int:
     for mode in ("plain", "oracle-one", "oracle-three", "oracle-all"):
         r = evaluate(store, questions, by_id, mode)
         rows.append({"mode": mode, **r})
-        print(
-            f"{mode:14s} {r['hit@1']:7.4f} {r['hit@5']:7.4f} "
-            f"{r['hit@10']:7.4f} {r['mrr']:7.4f}"
-        )
+        print(f"{mode:14s} {r['hit@1']:7.4f} {r['hit@5']:7.4f} {r['hit@10']:7.4f} {r['mrr']:7.4f}")
 
     store.close()
     if args.json:

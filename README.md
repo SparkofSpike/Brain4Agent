@@ -344,8 +344,14 @@ judgement the calling agent could make while it is already reasoning.
 Stage 0 (evaluation) and Stage 1 (core implementation) are complete: library,
 CLI, MCP server.
 
-Not built: PyPI release, cross-session aggregation, forgetting. The
-[decision log](docs/decisions.md) records what was rejected and why; the
+Not built: PyPI release, cross-session aggregation.
+
+Forgetting is implemented as `prune(keep_sessions=N)` — recency-based retention
+for bounding size, not a retrieval improvement. Measured: recovering a noisy
+corpus needs deleting 95% of it, which is emptying rather than forgetting
+(D-022).
+
+The [decision log](docs/decisions.md) records what was rejected and why; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the surrounding field.
 

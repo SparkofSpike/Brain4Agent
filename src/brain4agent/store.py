@@ -279,6 +279,35 @@ class MemoryStore:
         self.add(assistant, session_id=sid, role="assistant", timestamp=ts)
         return sid
 
+    def prune(self, *, keep_sessions: int) -> int:
+        """Delete the oldest sessions until at most `keep_sessions` remain.
+
+        Forgetting is part of the design, not an apology: a memory store that only
+        grows degrades, because every old near-duplicate competes with the answer
+        (D-020). Retention is by write order, on the assumption that a user's
+        recent work is what they ask about — a heuristic, and the simplest one
+        that does not require scoring memories.
+
+        Returns the number of sessions removed.
+        """
+        if keep_sessions < 1:
+            raise ValueError("keep_sessions must be at least 1")
+        if len(self._by_session) <= keep_sessions:
+            return 0
+
+        # Order sessions by their newest turn. rowid is write order and survives
+        # same-second timestamps, which created_at does not.
+        rows = self._db.execute(
+            "SELECT session_id, MAX(rowid) AS last FROM memories GROUP BY session_id"
+            " ORDER BY last DESC"
+        ).fetchall()
+        drop = [sid for sid, _ in rows[keep_sessions:]]
+
+        with self._db:
+            self._db.executemany("DELETE FROM memories WHERE session_id = ?", [(s,) for s in drop])
+        self._reload()
+        return len(drop)
+
     def forget_session(self, session_id: str) -> int:
         """Delete a session. Returns how many turns were removed."""
         with self._db:

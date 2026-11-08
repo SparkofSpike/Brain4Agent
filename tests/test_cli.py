@@ -69,6 +69,18 @@ def test_sessions_lists(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert "abc123" in out
 
 
+def test_prune(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    for i in range(3):
+        main(["--db", str(db), "add", f"内容{i}", "--session", f"s{i}"])
+    capsys.readouterr()
+
+    assert main(["--db", str(db), "prune", "--keep", "1"]) == 0
+    assert "removed 2 sessions" in capsys.readouterr().out
+
+    main(["--db", str(db), "stats"])
+    assert "sessions 1" in capsys.readouterr().out
+
+
 def test_forget(db: Path, capsys: pytest.CaptureFixture[str]) -> None:
     main(["--db", str(db), "add", "内容", "--session", "abc123"])
     capsys.readouterr()

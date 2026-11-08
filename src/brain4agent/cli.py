@@ -152,6 +152,18 @@ def cmd_stats(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_prune(args: argparse.Namespace) -> int:
+    """Keep only the most recently written sessions."""
+    store = _open(args)
+    try:
+        before = store.stats()["sessions"]
+        removed = store.prune(keep_sessions=args.keep)
+        print(f"removed {removed} sessions, {before} -> {store.stats()['sessions']}")
+        return 0
+    finally:
+        store.close()
+
+
 def cmd_forget(args: argparse.Namespace) -> int:
     store = _open(args)
     try:
@@ -193,6 +205,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("sessions", help="list sessions").set_defaults(func=cmd_sessions)
     sub.add_parser("stats", help="show counts").set_defaults(func=cmd_stats)
+
+    pr = sub.add_parser("prune", help="keep only the newest N sessions")
+    pr.add_argument("--keep", type=int, required=True)
+    pr.set_defaults(func=cmd_prune)
 
     f = sub.add_parser("forget", help="delete a session")
     f.add_argument("session")

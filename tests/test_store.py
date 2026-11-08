@@ -85,6 +85,33 @@ class TestStoreBasics:
                 assert len(s2) == 1
                 assert s2.search("持久化").evidence
 
+    def test_prune_keeps_newest(self, store: MemoryStore) -> None:
+        """Retention is by write order: recent work is what gets asked about."""
+        for i in range(5):
+            store.add(f"会话{i}的内容", session_id=f"s{i}")
+        assert store.prune(keep_sessions=2) == 3
+        assert store.stats()["sessions"] == 2
+        assert store.session("s0") == []
+        assert store.session("s4")
+
+    def test_prune_noop_when_under_limit(self, store: MemoryStore) -> None:
+        store.add("一条", session_id="a")
+        assert store.prune(keep_sessions=10) == 0
+
+    def test_prune_rejects_zero(self, store: MemoryStore) -> None:
+        with pytest.raises(ValueError):
+            store.prune(keep_sessions=0)
+
+    def test_prune_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "p.db"
+            with MemoryStore(db) as s:
+                for i in range(4):
+                    s.add(f"条目{i}", session_id=f"s{i}")
+                s.prune(keep_sessions=1)
+            with MemoryStore(db) as s2:
+                assert s2.stats()["sessions"] == 1
+
     def test_stats(self, store: MemoryStore) -> None:
         store.add("媒体投稿界面", session_id="s1")
         st = store.stats()
