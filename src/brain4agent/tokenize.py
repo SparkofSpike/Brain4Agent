@@ -81,7 +81,7 @@ def _cjk_bigrams(run: str) -> list[str]:
     return []
 
 
-def _load_jieba():
+def load_jieba():
     """Import jieba once, with its startup banner silenced.
 
     The banner goes to stderr and is a full sentence of noise for a CLI user who
@@ -105,7 +105,7 @@ def word_tokens(text: str) -> list[str]:
     inference, no accelerator. Falls back to bigrams, which is noisier in a
     report but never wrong about presence.
     """
-    jieba = _load_jieba()
+    jieba = load_jieba()
     if jieba is None:
         return tokenize(text)
 
@@ -129,12 +129,19 @@ class BM25:
         self._df: Counter[str] = Counter()
         self._avgdl: float = 0.0
         self._n: int = 0
+        self._order: dict[str, int] = {}
 
     def __len__(self) -> int:
         return self._n
 
     def index(self, items: list[tuple[str, str]]) -> None:
         self._ids = [i for i, _ in items]
+        # Insertion order, used to break score ties. Ties are not a corner case
+        # here: an entity-swapped hard negative scores within a hair of its
+        # original, and breaking the tie by identifier made the winner depend on
+        # whether the id happened to be a UUID. Same query, different answer,
+        # run to run.
+        self._order = {i: pos for pos, (i, _) in enumerate(items)}
         self._docs = []
         self._lens = []
         self._df = Counter()
@@ -171,5 +178,5 @@ class BM25:
             if score > 0.0:
                 scores.append((self._ids[idx], score))
 
-        scores.sort(key=lambda kv: (-kv[1], kv[0]))
+        scores.sort(key=lambda kv: (-kv[1], self._order.get(kv[0], 0)))
         return scores[:top_k]

@@ -98,8 +98,12 @@ class MemoryStore:
         self.close()
 
     def _reload(self) -> None:
+        # ORDER BY rowid, not created_at: timestamps have second precision, so
+        # everything written in the same second compares equal and SQLite is free
+        # to return it in any order. rowid is the write order, which is the order
+        # the caller meant.
         rows = self._db.execute(
-            "SELECT id, session_id, role, content, created_at FROM memories ORDER BY created_at"
+            "SELECT id, session_id, role, content, created_at FROM memories ORDER BY rowid"
         ).fetchall()
         self._by_session = {}
         self._session_text = {}
@@ -289,4 +293,10 @@ class MemoryStore:
         return "\n".join(f"{m.role}: {m.content}" for m in turns)
 
     def session(self, session_id: str) -> list[Memory]:
-        return sorted(self._by_session.get(session_id, []), key=lambda m: m.created_at)
+        """Turns in the session, in the order they were written.
+
+        No re-sorting: ``_by_session`` is already in rowid order, and sorting by
+        a second-precision timestamp would shuffle turns written in the same
+        second.
+        """
+        return list(self._by_session.get(session_id, []))
