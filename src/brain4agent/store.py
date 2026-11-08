@@ -26,12 +26,15 @@ import uuid
 from collections.abc import Callable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
+from dataclasses import replace as dc_replace
 from datetime import UTC, datetime
 from functools import lru_cache
 from pathlib import Path
 
 from brain4agent.evidence import Evidence, JudgedResult, SearchResult, build_evidence
 from brain4agent.extract import Extractor
+from brain4agent.simhash import DEFAULT_THRESHOLD, near_duplicate
+from brain4agent.simhash import fingerprint as simhash_of
 from brain4agent.tokenize import BM25, both_tokens, jieba_tokens, load_jieba, tokenize
 
 
@@ -74,7 +77,9 @@ CREATE TABLE IF NOT EXISTS memories (
     source_text TEXT,
     tags        TEXT NOT NULL DEFAULT '',
     superseded_by TEXT,
-    refs        TEXT NOT NULL DEFAULT ''
+    refs        TEXT NOT NULL DEFAULT '',
+    fingerprint INTEGER NOT NULL DEFAULT 0,
+    accesses    INTEGER NOT NULL DEFAULT 0
 );
 CREATE INDEX IF NOT EXISTS idx_memories_session ON memories(session_id);
 CREATE INDEX IF NOT EXISTS idx_memories_created ON memories(created_at);
@@ -112,6 +117,13 @@ class Memory:
     # depended on is exactly what the asker needs next. Expansion is opt-in at
     # search time because it trades precision for completeness.
     refs: tuple[str, ...] = ()
+    # SimHash of the content. Two memories with fingerprints a few bits apart are
+    # probably saying the same thing; the store reports that, it does not act on
+    # it. See simhash.py.
+    fingerprint: int = 0
+    # How many times a search has returned this memory. Recorded, not yet used for
+    # ranking -- reinforcement needs evidence first, and there is none yet.
+    accesses: int = 0
 
 
 def _now() -> str:
@@ -192,6 +204,11 @@ class MemoryStore:
             ("tags", "ALTER TABLE memories ADD COLUMN tags TEXT NOT NULL DEFAULT ''"),
             ("superseded_by", "ALTER TABLE memories ADD COLUMN superseded_by TEXT"),
             ("refs", "ALTER TABLE memories ADD COLUMN refs TEXT NOT NULL DEFAULT ''"),
+            (
+                "fingerprint",
+                "ALTER TABLE memories ADD COLUMN fingerprint INTEGER NOT NULL DEFAULT 0",
+            ),
+            ("accesses", "ALTER TABLE memories ADD COLUMN accesses INTEGER NOT NULL DEFAULT 0"),
         ):
             if column not in cols:
                 db.execute(ddl)
@@ -212,7 +229,8 @@ class MemoryStore:
         # the caller meant.
         rows = self._db.execute(
             "SELECT id, session_id, role, content, created_at, tokens,"
-            " kind, importance, entities, source_text, tags, superseded_by, refs"
+            " kind, importance, entities, source_text, tags, superseded_by, refs,"
+            " fingerprint, accesses"
             " FROM memories ORDER BY rowid"
         ).fetchall()
         self._by_session = {}
@@ -236,6 +254,8 @@ class MemoryStore:
             tags,
             superseded,
             refs,
+            fingerprint,
+            accesses,
         ) in rows:
             mem = Memory(
                 id=mid,
@@ -250,6 +270,8 @@ class MemoryStore:
                 tags=tuple(tags.split()) if tags else (),
                 superseded_by=superseded,
                 refs=tuple(refs.split()) if refs else (),
+                fingerprint=fingerprint & ((1 << 64) - 1),
+                accesses=accesses,
             )
             self._by_session.setdefault(sid, []).append(mem)
             self._id_to_session[mid] = sid
@@ -358,11 +380,22 @@ class MemoryStore:
             if " " in t.strip():
                 raise ValueError(f"tag must not contain spaces: {t!r}")
 
+        # Fingerprint the stored text, not the index text. Two memories that say
+        # the same thing should collide even if one is indexed more narrowly.
+        #
+        # SimHash is a 64-bit *unsigned* value and SQLite's INTEGER is signed, so
+        # anything with the top bit set overflows on insert. Store it as a two's
+        # complement signed value and mask it back on read; the fingerprint itself
+        # is unchanged.
+        fp = simhash_of(text)
+        fp_signed = fp - (1 << 64) if fp >= 1 << 63 else fp
+
         sql = (
             "INSERT INTO memories"
             " (id, session_id, role, content, created_at, tokens,"
-            " kind, importance, entities, source_text, tags, superseded_by, refs)"
-            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            " kind, importance, entities, source_text, tags, superseded_by, refs,"
+            " fingerprint, accesses)"
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         params = (
             mid,
@@ -378,6 +411,8 @@ class MemoryStore:
             tag_text,
             superseded_by,
             " ".join(refs),
+            fp_signed,
+            0,
         )
         if self._defer_commit:
             # Inside batch(): defer the fsync. A thousand individual commits is
@@ -400,6 +435,8 @@ class MemoryStore:
             tags=tuple(t.strip() for t in tags if t.strip()),
             superseded_by=superseded_by,
             refs=tuple(refs),
+            fingerprint=fp,
+            accesses=0,
         )
         self._by_session.setdefault(sid, []).append(mem)
         self._id_to_session[mid] = sid
@@ -693,25 +730,78 @@ class MemoryStore:
             # high-scoring relation push out everything else and then keep its
             # refs anyway.
             hits = self._with_refs(hits[:top_k], tags, kinds, include_superseded)
-            return build_evidence(
+            return self._annotate(
+                build_evidence(
+                    query=query,
+                    hits=hits,
+                    by_session=self._by_session,
+                    session_text=self._session_text,
+                    id_to_session=self._id_to_session,
+                    sessions_searched=self.sessions,
+                    top_k=len(hits),
+                )
+            )
+
+        return self._annotate(
+            build_evidence(
                 query=query,
                 hits=hits,
                 by_session=self._by_session,
                 session_text=self._session_text,
                 id_to_session=self._id_to_session,
                 sessions_searched=self.sessions,
-                top_k=len(hits),
+                top_k=top_k,
             )
-
-        return build_evidence(
-            query=query,
-            hits=hits,
-            by_session=self._by_session,
-            session_text=self._session_text,
-            id_to_session=self._id_to_session,
-            sessions_searched=self.sessions,
-            top_k=top_k,
         )
+
+    def duplicates_of(self, memory_id: str, *, threshold: int = DEFAULT_THRESHOLD) -> list[str]:
+        """Memories that may be saying the same thing as ``memory_id``.
+
+        A linear scan. At a few thousand memories that is well under a
+        millisecond, and a SimHash bucket index would be the wrong first move --
+        the point is to notice, not to scale.
+
+        Superseded memories are excluded: a replacement resembling the thing it
+        replaced is the intended outcome, not a duplicate.
+        """
+        self._ensure_fresh()
+        mem = self._by_id.get(memory_id)
+        if mem is None or not mem.fingerprint:
+            return []
+        # A replaced memory has no duplicates to report: it is not the current
+        # statement of anything, and its resemblance to its own replacement is the
+        # intended outcome rather than a duplicate to flag.
+        if mem.superseded_by:
+            return []
+        out: list[str] = []
+        for other in self._by_id.values():
+            if other.id == memory_id or not other.fingerprint or other.superseded_by:
+                continue
+            if near_duplicate(mem.fingerprint, other.fingerprint, threshold):
+                out.append(other.id)
+        return out
+
+    def _annotate(self, result: SearchResult) -> SearchResult:
+        """Attach duplicate hints and bump access counts.
+
+        Access counts are written here rather than in a background pass because
+        this is the only moment the store knows a memory was useful. The in-memory
+        copy is left alone: updating it would mark the index dirty and rebuild on
+        the next read, which costs far more than a stale counter on an object
+        nothing ranks by yet.
+        """
+        if not result.evidence:
+            return result
+
+        enriched = []
+        for e in result.evidence:
+            dups = self.duplicates_of(e.memory.id)
+            enriched.append(dc_replace(e, possible_duplicates=dups) if dups else e)
+
+        ids = [(e.memory.id,) for e in result.evidence]
+        with self._db:
+            self._db.executemany("UPDATE memories SET accesses = accesses + 1 WHERE id = ?", ids)
+        return dc_replace(result, evidence=enriched)
 
     def _with_refs(
         self,
@@ -807,9 +897,24 @@ class MemoryStore:
         return not out_of_scope
 
     def memory(self, memory_id: str) -> Memory | None:
-        """One memory by id, or None. Triggers a reload if the store changed."""
+        """One memory by id, or None. Triggers a reload if the store changed.
+
+        Access counts are read from the database here rather than trusted from the
+        in-memory copy. `_annotate` bumps them on every search but deliberately
+        does not rebuild the index to reflect that, so the cached object lags by
+        exactly the reads that just happened -- which makes a counter look broken
+        the moment anyone checks it.
+        """
         self._ensure_fresh()
-        return self._by_id.get(memory_id)
+        mem = self._by_id.get(memory_id)
+        if mem is None:
+            return None
+        row = self._db.execute(
+            "SELECT accesses FROM memories WHERE id = ?", (memory_id,)
+        ).fetchone()
+        if row is not None and row[0] != mem.accesses:
+            return dc_replace(mem, accesses=row[0])
+        return mem
 
     def supersede(self, old_id: str, new_id: str) -> bool:
         """Mark ``old_id`` as replaced by ``new_id``.

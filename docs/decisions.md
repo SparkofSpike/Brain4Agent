@@ -1492,3 +1492,61 @@ might assume.
 One test was rewritten rather than repaired. `include_superseded=True` now
 returns **both** rows: the old one matches on its own text, the new one on what it
 inherited. The previous assertion had them mutually exclusive.
+---
+
+## D-028 Near-duplicates are reported, never merged
+
+**Context.** The user asked what "cross-session aggregation" meant, and the
+answer exposed a second gap besides D-027. Two sessions can say the same thing in
+slightly different words, and nothing in the store noticed. A search returns both;
+the reader has to work out which is current. D-027 handles the case where a
+caller *declared* a replacement. This handles the case where nobody did.
+
+nmem solves this inside its consolidate pass. Reading its implementation
+(`engine/consolidation.py`) gives four operations — reinforce by access frequency,
+prune by weight decay, merge overlapping fibres, summarise clusters into concept
+neurons. Two of those are worth having here, and two are not:
+
+- **Merge**: worth it, and it needs no model. nmem uses SimHash.
+- **Summarise**: needs a model. The caller has one.
+- **Reinforce by frequency**: needs an access counter, and nothing yet justifies
+  letting it affect ranking.
+- **Prune by weight**: D-022 already showed the naive version does not work.
+
+**Decision, part one: detect, do not merge.** A SimHash fingerprint is computed
+at write time and stored. `duplicates_of(id)` returns memories within a Hamming
+distance of 10, and every `Evidence` carries `possible_duplicates`.
+
+**No automatic merge, and this is the important half.** Merging is irreversible.
+The store has no standing to decide that two memories state the same fact — that
+requires reading both and judging, which is what the calling agent does for a
+living. What the agent could not do was notice. Now it can.
+
+The feedback loop is the point: search returns `possible_duplicates`, the agent
+reads them, and if they are the same thing it calls `supersede()`. The store never
+guesses.
+
+**Decision, part two: count accesses, do not rank by them.** Every search
+increments an `accesses` column on the memories it returned. nmem boosts synapse
+weights for frequently-traversed paths; this records the same signal and does
+nothing with it yet. Frequency-based ranking is a hypothesis, and this project's
+rule is that a hypothesis needs a measurement before it changes behaviour.
+
+**Measured.** Three benchmarks unchanged: PrecisionMemBench 64/77 and 34/43,
+LoCoMo hit@1 0.6270, Chinese 0.9250. Nothing regressed, which is the only claim
+available — the feature is additive and no benchmark tests it.
+
+Two implementation notes worth keeping:
+
+- SimHash is 64-bit unsigned and SQLite's INTEGER is signed. Storing the raw value
+  overflows on insert. It is stored two's-complement and masked back on read.
+- `memory()` re-reads the access count from the database instead of trusting the
+  cached object, because `_annotate` bumps the counter without marking the index
+  dirty. Without that, a counter that had just been incremented read back as 0.
+
+**What is still open.** The 10-bit threshold was taken from the literature, not
+measured against this corpus. On the one hand-constructed example (a changed IP
+address) it separates correctly: 5 bits apart for a one-character edit, 30 bits
+apart for a different topic. Whether that holds across the real corpus, and
+whether 10 is the right cut, is unmeasured. Until then `possible_duplicates` is a
+hint, and the README says so.

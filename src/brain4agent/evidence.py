@@ -91,6 +91,11 @@ class Evidence:
     score: float
     coverage: float
     missing_terms: list[str] = field(default_factory=list)
+    # Memories whose text is close enough to this one that they may be saying the
+    # same thing. Reported, not resolved: the caller has a model and can read both
+    # and decide. Silently merging would be irreversible and this store has no
+    # standing to make that call.
+    possible_duplicates: list[str] = field(default_factory=list)
 
     @property
     def session_id(self) -> str:
