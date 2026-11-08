@@ -362,7 +362,7 @@ built around that rather than pretending otherwise.
 
 ## Design decisions
 
-Twenty-one decisions, each with the measurement or reasoning behind it, in
+Twenty-two decisions, each with the measurement or reasoning behind it, in
 [`docs/decisions.md`](docs/decisions.md). Both directions are recorded —
 including the hypotheses that were tested and failed.
 
