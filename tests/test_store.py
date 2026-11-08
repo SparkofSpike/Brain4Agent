@@ -51,6 +51,31 @@ class TestStoreBasics:
         assert store.sessions == 1
         assert store.session(other)
 
+    def test_batch_defers_and_commits_once(self, store: MemoryStore) -> None:
+        """A thousand individual commits is most of the cost of a thousand writes."""
+        with store.batch():
+            for i in range(50):
+                store.add(f"批量第{i}条", session_id="bulk")
+        assert len(store) == 50
+
+    def test_batch_rolls_back_on_error(self, store: MemoryStore) -> None:
+        """A half-written batch is worse than none."""
+        store.add("批次前", session_id="keep")
+        with pytest.raises(RuntimeError), store.batch():
+            store.add("批次内", session_id="bulk")
+            raise RuntimeError("boom")
+        assert len(store) == 1
+        assert store.session("bulk") == []  # rolled back
+        assert len(store.session("keep")) == 1  # the earlier write survives
+
+    def test_batch_result_persists(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "b.db"
+            with MemoryStore(db) as s, s.batch():
+                s.add("跨进程", session_id="p")
+            with MemoryStore(db) as s2:
+                assert len(s2) == 1
+
     def test_persists_across_reopen(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "brain.db"

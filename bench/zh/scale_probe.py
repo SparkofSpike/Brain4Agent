@@ -135,30 +135,32 @@ def build(
     store = MemoryStore(tmp, bm25_b=b, bm25_k1=k1)
 
     def add_original() -> None:
-        for sid, turns in zip(ids, sessions, strict=True):
-            for turn in turns:
-                store.add(turn["content"], session_id=sid, role=turn["role"])
+        with store.batch():
+            for sid, turns in zip(ids, sessions, strict=True):
+                for turn in turns:
+                    store.add(turn["content"], session_id=sid, role=turn["role"])
 
     def add_noise() -> None:
-        made = 0
-        k = 0
-        while made < noise:
-            for sid, turns in zip(ids, sessions, strict=True):
-                if made >= noise:
-                    break
-                variant = f"{sid}-n{k}"
-                for turn in turns:
-                    if mode == "unanswered" and turn["role"] == "assistant":
-                        text = to_unanswered(turn["content"])
-                    elif mode == "unanswered":
-                        text = turn["content"]
-                    elif mode == "soft":
-                        text = substitute_soft(turn["content"], k)
-                    else:
-                        text = substitute_same_answer(turn["content"], k)
-                    store.add(text, session_id=variant, role=turn["role"])
-                made += 1
-                k += 1
+        with store.batch():
+            made = 0
+            k = 0
+            while made < noise:
+                for sid, turns in zip(ids, sessions, strict=True):
+                    if made >= noise:
+                        break
+                    variant = f"{sid}-n{k}"
+                    for turn in turns:
+                        if mode == "unanswered" and turn["role"] == "assistant":
+                            text = to_unanswered(turn["content"])
+                        elif mode == "unanswered":
+                            text = turn["content"]
+                        elif mode == "soft":
+                            text = substitute_soft(turn["content"], k)
+                        else:
+                            text = substitute_same_answer(turn["content"], k)
+                        store.add(text, session_id=variant, role=turn["role"])
+                    made += 1
+                    k += 1
 
     if order == "noise-first":
         add_noise()

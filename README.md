@@ -69,13 +69,26 @@ user: 中文查询搜不到记忆，recall 返回空
 assistant: 根因在 keywords.py 第 443 行，正则不含汉字范围
 ```
 
-A question the store cannot answer:
+Now a question the store cannot answer:
 
 ```bash
 $ brain4agent search "杭州测试机上装的是什么数据库" -k 1
 1 sessions for '杭州测试机上装的是什么数据库'
   corpus has no: 数据库, 机上
   [ 4.81 cov=0.28] c060a5294037  session lacks: 数据库, 机上
+```
+
+Bulk-load an existing history from JSONL (one object per line, `content`
+required):
+
+```bash
+$ brain4agent import conversations.jsonl
+imported 4 turns across 2 sessions
+```
+
+```jsonl
+{"session_id": "s1", "role": "user", "content": "中文查询搜不到记忆"}
+{"session_id": "s1", "role": "assistant", "content": "根因在 keywords.py 第 443 行"}
 ```
 
 The `corpus has no:` line is the point. It does not mean "not found" — it means
@@ -169,7 +182,15 @@ One SQLite file. Rows are turns; the unit of retrieval is the session. Index
 tokens are computed at write time and cached in a column, so rebuilding the
 in-memory index is a counting exercise rather than a re-segmentation.
 
-At 127 turns: rebuild 3.7 ms, query 1.9 ms, reopen 6.5 ms.
+Writes commit in batches. `with store.batch():` defers the commit to one per
+group, which took a 1,016-turn import from 3.8 s to 0.25 s -- a thousand
+individual commits costs more than the thousand writes.
+
+```
+                       import    rebuild   query
+127 turns   44 sessions          3.9 ms   1.8 ms
+1016 turns  352 sessions  0.25 s  29 ms   3.7 ms
+```
 
 ### Read/write tokenizer split
 

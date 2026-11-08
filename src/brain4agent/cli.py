@@ -12,6 +12,7 @@ but which word in the question the corpus never contained.
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import sys
 from pathlib import Path
@@ -73,6 +74,51 @@ def cmd_search(args: argparse.Namespace) -> int:
             if e.missing_terms:
                 print(f"this session lacks: {', '.join(e.missing_terms)}")
             print(store.session_text(e.session_id))
+        return 0
+    finally:
+        store.close()
+
+
+def cmd_import(args: argparse.Namespace) -> int:
+    """Bulk-load turns from JSONL, one object per line.
+
+    Expected shape, all keys optional except content:
+
+        {"session_id": "s1", "role": "assistant", "content": "..."}
+
+    A missing session_id starts a new session. Imported as one transaction --
+    a thousand individual commits costs more than the thousand writes.
+    """
+    path = Path(args.path)
+    if not path.exists():
+        print(f"no such file: {path}", file=sys.stderr)
+        return 1
+
+    store = _open(args)
+    try:
+        turns = 0
+        sessions: set[str] = set()
+        with store.batch(), path.open("r", encoding="utf-8-sig") as fh:
+            # utf-8-sig, and streamed rather than read whole: hand-written files
+            # often carry a BOM, and an import is the one operation likely to be
+            # pointed at a large file.
+            for lineno, line in enumerate(fh, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError as exc:
+                    print(f"line {lineno}: {exc}", file=sys.stderr)
+                    return 1
+                content = str(obj.get("content") or "").strip()
+                if not content:
+                    continue
+                sid = obj.get("session_id") or store.new_session()
+                store.add(content, session_id=sid, role=obj.get("role") or "user")
+                sessions.add(sid)
+                turns += 1
+        print(f"imported {turns} turns across {len(sessions)} sessions")
         return 0
     finally:
         store.close()
@@ -140,6 +186,10 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("query")
     s.add_argument("--top-k", "-k", type=int, default=3)
     s.set_defaults(func=cmd_search)
+
+    i = sub.add_parser("import", help="bulk-load turns from JSONL")
+    i.add_argument("path")
+    i.set_defaults(func=cmd_import)
 
     sub.add_parser("sessions", help="list sessions").set_defaults(func=cmd_sessions)
     sub.add_parser("stats", help="show counts").set_defaults(func=cmd_stats)

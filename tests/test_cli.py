@@ -93,6 +93,42 @@ def test_exchange_creates_one_session(db: Path, capsys: pytest.CaptureFixture[st
     assert "turns    2" in out
 
 
+def test_import_jsonl(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = tmp_path / "in.jsonl"
+    src.write_text(
+        "\n".join(
+            [
+                '{"session_id": "s1", "role": "user", "content": "中文查询搜不到"}',
+                '{"session_id": "s1", "role": "assistant", "content": "根因在 keywords.py"}',
+                '{"content": "没有 session 字段会开新会话"}',
+            ]
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+    assert main(["--db", str(db), "import", str(src)]) == 0
+    out = capsys.readouterr().out
+    assert "imported 3 turns across 2 sessions" in out
+
+
+def test_import_tolerates_bom(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """Hand-written JSONL frequently carries a BOM; PowerShell adds one."""
+    src = tmp_path / "bom.jsonl"
+    src.write_text('{"content": "带 BOM 的行"}\n', encoding="utf-8-sig")
+    assert main(["--db", str(db), "import", str(src)]) == 0
+    assert "imported 1 turns" in capsys.readouterr().out
+
+
+def test_import_bad_json(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    src = tmp_path / "bad.jsonl"
+    src.write_text("not json\n", encoding="utf-8")
+    assert main(["--db", str(db), "import", str(src)]) == 1
+
+
+def test_import_missing_file(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert main(["--db", str(db), "import", str(tmp_path / "nope.jsonl")]) == 1
+
+
 def test_default_db_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """BRAIN4AGENT_DB must win over the default, without callers passing --db."""
     from brain4agent.cli import default_db
