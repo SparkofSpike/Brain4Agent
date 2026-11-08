@@ -17,26 +17,46 @@ should come back when it matters, and stay out when it does not.
 ## Result
 
 ```
-pass   : 64/77  = 0.8312
-active : 34/43  = 0.7907      ← comparable to the published column
+active : 34/43  = 0.7907      <- the honest column
+pass   : 64/77  = 0.8312      <- includes 33 any-store passes
 ```
 
-Published systems on the same dataset (AMB `external_results.json`):
+Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 
 ```
-this store             0.8312
-open-knowledge-format  0.4675
-gbrain                 0.4416
-supermemory            0.2727
-zep                    0.1169
-atomicmemory           0.1169
-agentmemory            0.0909
+System                  Active    Total
+----------------------  ------    -----
+tenure (the authors)    43/43     77/77
+this store              34/43     64/77
+open-knowledge-format   18/43     36/77
+atomicmemory             5/43     16/77
+supermemory              2/43     15/77
+yourmemory               0/43     21/77
+gbrain                   0/43     11/77
+hindsight                0/43     11/77
+zep                      0/43      9/77
+agentmemory              0/43      9/77
+cognee                   0/43      9/77
+mem0                     0/43      9/77
+a-mem                    0/43      7/77
 ```
 
-`pass` counts every case, including ones whose assertions only touch tiers the
-harness derives from the seed corpus — a store that returns nothing still passes
-those. `active` counts only cases needing query-dependent retrieval, which is the
-column upstream calls "Active passes".
+`pass` counts every case, including 33 whose assertions only touch tiers the
+harness derives from the seed corpus — an empty store passes those, so `pass`
+overstates retrieval ability. `active` counts only cases needing query-dependent
+retrieval, the column upstream calls "Active passes", and it is the one to quote.
+
+**A correction.** Earlier versions of this file quoted AMB's
+`external_results.json` (gbrain 0.4416, supermemory 0.2727, zep 0.1169) and
+called 0.4675 "the highest published". Those numbers disagree with the
+benchmark's own site — it records gbrain at 11/77, not 34/77 — and the site is
+authoritative. The old table also compared this store's **active** rate against
+those **total** rates: two different denominators. Both columns appear above so
+that cannot recur.
+
+The claim this supports is narrower than the one it replaces: **best third-party
+result on this benchmark**. Not "beat the state of the art" — the authors' own
+implementation scores 43/43 and 77/77.
 
 **No model is used anywhere.** Every improvement below is a rule about text and
 labels.

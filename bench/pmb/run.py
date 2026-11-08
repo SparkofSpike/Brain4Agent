@@ -2,9 +2,17 @@
 
     python -m bench.pmb.run
 
-The published baseline to beat is 0.4675 (open-knowledge-format), the highest
-recorded in AMB's external_results.json (11 entries as of this writing). zep is
-0.1169, supermemory 0.2727, gbrain 0.4416.
+The official comparison table is at `tenureai.dev/benchmark`. It reports two
+columns and they are not interchangeable: `active` (43 cases that need
+query-dependent retrieval) and `total` (77, including 33 any store passes).
+Baselines as of this writing: open-knowledge-format 18/43 active, 36/77 total;
+atomicmemory 5/43, 16/77; supermemory 2/43, 15/77. The benchmark's own reference
+implementation scores 43/43 and 77/77.
+
+Do not quote AMB's `external_results.json` for this dataset. It disagrees with
+the benchmark's own site — it records gbrain at 34/77 where the site says 11/77 —
+and mixing its total-pass figures against this harness's active rate is the exact
+comparison error this docstring exists to prevent.
 
 Two numbers matter and they are not the same:
 
@@ -163,15 +171,27 @@ def main() -> int:
     print(f"pass   : {passed}/{n} = {passed / n:.4f}")
     print(f"active : {active_passed}/{active_total} = {active_passed / active_total:.4f}")
     print()
-    print("published comparison (AMB external_results, all systems, any model):")
-    for name, score in [
-        ("open-knowledge-format", 0.4675),
-        ("gbrain", 0.4416),
-        ("supermemory", 0.2727),
-        ("zep", 0.1169),
-        ("agentmemory", 0.0909),
+    print("official table (tenureai.dev/benchmark):")
+    print(f"  {'system':<24} {'active':>9} {'total':>9}")
+    for name, act, tot in [
+        ("tenure (authors)", 43, 77),
+        ("this store", active_passed, passed),
+        ("open-knowledge-format", 18, 36),
+        ("atomicmemory", 5, 16),
+        ("supermemory", 2, 15),
+        ("yourmemory", 0, 21),
+        ("gbrain", 0, 11),
+        ("hindsight", 0, 11),
+        ("zep", 0, 9),
+        ("agentmemory", 0, 9),
+        ("cognee", 0, 9),
+        ("mem0", 0, 9),
+        ("a-mem", 0, 7),
     ]:
-        print(f"  {name:<24} {score:.4f}")
+        mark = "  <-" if name == "this store" else ""
+        print(f"  {name:<24} {act:>3}/43  {tot:>3}/77{mark}")
+    print()
+    print("  active is the honest column; 33 of 77 cases pass with an empty store.")
     print()
 
     print("by category:")

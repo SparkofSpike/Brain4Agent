@@ -283,10 +283,11 @@ the top ten.
 That sentence used to appear here as a general claim, and it was wrong. It holds
 for this benchmark and does not transfer:
 
-| benchmark | metric | this store | previous best published |
+| benchmark | metric | this store | best third-party |
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
-| PrecisionMemBench | pass | **0.8312** | 0.4675 |
+| PrecisionMemBench | active | **34/43** | 18/43 (open-knowledge-format) |
+| PrecisionMemBench | total | **64/77** | 36/77 (open-knowledge-format) |
 | LoCoMo | hit@1 | **0.6270** | not comparable (see below) |
 
 The retriever is the same in all three. What differs is what the question asks
@@ -302,33 +303,55 @@ depends entirely on what counts as a hit.
 
 77 single-turn cases over 35 beliefs. No generation model and no judge: the
 answer *is* the set of belief IDs the store returns, and each case asserts which
-IDs may and may not be in it. Noise is a hard failure.
+IDs may and may not be in it.
 
 ```
-pass    64/77 = 0.8312
-active  34/43 = 0.7907     (cases that need query-dependent retrieval)
+active  34/43 = 0.7907     cases that need query-dependent retrieval
+ total  64/77 = 0.8312     including cases any store passes
 ```
 
-Published on the same data (AMB `external_results.json`):
+Two numbers, because the benchmark reports two and they are not interchangeable.
+**`active` is the honest one**: 33 of the 77 cases pass with an empty store,
+because their assertions only touch tiers the harness derives from the corpus
+itself (persona prelude, pinned facts, open questions). Quoting `total` alone
+would credit this store for work it did not do.
+
+Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 
 ```
-this store             0.8312
-open-knowledge-format  0.4675
-gbrain                 0.4416
-supermemory            0.2727
-zep                    0.1169
-atomicmemory           0.1169
-agentmemory            0.0909
+System                  Active    Total
+----------------------  ------    -----
+tenure (the authors)    43/43     77/77
+this store              34/43     64/77
+open-knowledge-format   18/43     36/77
+atomicmemory             5/43     16/77
+supermemory              2/43     15/77
+yourmemory               0/43     21/77
+gbrain                   0/43     11/77
+hindsight                0/43     11/77
+zep                      0/43      9/77
+agentmemory              0/43      9/77
+cognee                   0/43      9/77
+mem0                     0/43      9/77
+a-mem                     0/43      7/77
 ```
 
-`python -m bench.pmb.run` — no API key, no network, data in `bench/pmb/data/`.
+This store beats every third-party system on both columns. **It does not beat
+the benchmark's own reference implementation**, which scores 43/43 and 77/77,
+and there would be no reason to expect it to.
 
-This is the corpus where D-020 said BM25 would fail — 35 beliefs, near-identical
-subjects, the same word `redis` in both the code memory and the writing memory.
-It failed at 0.3766 until memories carried scope tags, supersession links and
-relation refs (D-025), and until the index held the belief's own names rather
-than its explanatory prose (D-026). Same BM25 throughout; only the write side and
-the index changed.
+**A correction worth spelling out.** Earlier versions of this README quoted
+numbers from AMB's `external_results.json` — gbrain 0.4416, supermemory 0.2727,
+zep 0.1169, and 0.4675 as "the highest published" — and compared this store's
+**active** rate (0.7907) against those **total** rates. That is two errors in one
+sentence. The numbers disagree with the benchmark's own site (it records gbrain
+at 11/77, not 34/77), and the site is authoritative. And the two columns have
+different denominators: 0.4675 is 36/77 total, while open-knowledge-format's
+active rate is 18/43 = 0.4186.
+
+Both columns are now given side by side so the comparison cannot be mixed again.
+The claim this supports is narrower than the one it replaces: **best third-party
+result on this benchmark**, not "beat the state of the art".
 
 ### LoCoMo — retrieval
 
@@ -466,20 +489,24 @@ number on this page therefore gets a Wilson 95% interval:
 
 | result | fraction | 95% CI | width |
 |---|---|---|---|
-| PrecisionMemBench, this store | 64/77 = 0.8312 | 0.7323 – 0.8986 | 16.6 pp |
-| PrecisionMemBench, open-knowledge-format | 36/77 = 0.4675 | 0.3603 – 0.5779 | 21.8 pp |
+| PrecisionMemBench **active**, this store | 34/43 = 0.7907 | 0.6479 – 0.8858 | 23.8 pp |
+| PrecisionMemBench **active**, open-knowledge-format | 18/43 = 0.4186 | 0.2838 – 0.5667 | 28.3 pp |
+| PrecisionMemBench **total**, this store | 64/77 = 0.8312 | 0.7323 – 0.8986 | 16.6 pp |
+| PrecisionMemBench **total**, open-knowledge-format | 36/77 = 0.4675 | 0.3603 – 0.5779 | 21.8 pp |
 | Chinese hit@1 (40 answerable) | 37/40 = 0.9250 | 0.8014 – 0.9742 | 17.3 pp |
 | LoCoMo hit@1 | 960/1531 = 0.6270 | 0.6025 – 0.6509 | 4.8 pp |
 | LoCoMo hit@5 | 1355/1531 = 0.8850 | 0.8681 – 0.9001 | 3.2 pp |
 
 The intervals are wide, and that is the honest cost of 77 cases. The comparison
-still holds: **this store's lower bound, 0.7323, is 15 points above the previous
-best's upper bound, 0.5779.** The intervals do not overlap. A 36-point gap does
-not fit inside a 17-point interval.
+still holds on **both** denominators, which matters because they are not
+interchangeable:
 
-The Chinese number is the one to treat carefully. 37 of 40 gives [0.80, 0.97];
-the point estimate 0.925 should not be quoted as though it were precise. It is a
-direction, not a value.
+- active: 0.6479 lower bound against 0.5667 upper bound, an 8-point gap
+- total: 0.7323 lower bound against 0.5779 upper bound, a 15-point gap
+
+Neither pair overlaps. The Chinese number is the one to treat carefully: 37 of 40
+gives [0.80, 0.97]; the point estimate 0.925 should not be quoted as though it
+were precise. It is a direction, not a value.
 
 Two things this table cannot fix. **PrecisionMemBench is one benchmark**; a second
 corpus with the same shape would either confirm the effect or show it was specific

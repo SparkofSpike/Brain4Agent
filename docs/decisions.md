@@ -1300,7 +1300,10 @@ raw BM25, top_k=1                    0.3766   active 0.4419
 + relation expansion                 0.6104           0.6279
 ```
 
-Highest published on this dataset is 0.4675. Worth repeating: this is a retrieval
+Third-party results on this dataset, per the benchmark's own site
+(`tenureai.dev/benchmark`): open-knowledge-format 18/43 active and 36/77 total is
+the best of them. The benchmark's authors score 43/43 and 77/77 with their own
+implementation. Worth repeating: this is a retrieval
 precision benchmark, not conversational recall, and none of these numbers say
 anything about LoCoMo or LongMemEval.
 
@@ -1402,8 +1405,16 @@ The counting lives in the harness, not the store. `MemoryStore.search` takes a
 anything that needs the fixture to interpret a question belongs above the store,
 not inside it.
 
-**Result.** 0.8312 pass, 0.7907 active, against a published best of 0.4675 and a
-starting point of 0.3766. Still no model.
+**Result.** 34/43 active and 64/77 total, from a starting point of 0.3766. Best
+third-party result on the benchmark; the authors' own implementation is 43/43.
+
+**Correction, later.** The first version of this entry said "above the published
+best of 0.4675" and sourced its comparison table from AMB's
+`external_results.json`. Both were wrong. 0.4675 is open-knowledge-format's
+**total** rate (36/77), while this store's headline was its **active** rate
+(34/43) — two different denominators. And AMB's file disagrees with the
+benchmark's own site, which records gbrain at 11/77 rather than 34/77. The
+narrower claim, best third-party result on both columns, is what survives. Still no model.
 
 **What remains is not rules.** 13 cases fail, and the residue is ordering and
 fuzzy matching -- "k9s" for k8s, "mango" for MongoDB. Selection is largely solved;
