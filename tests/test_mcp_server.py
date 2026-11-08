@@ -47,7 +47,13 @@ class TestHandshake:
     def test_tools_listed(self, server: Server) -> None:
         out = server.handle(rpc(1, "tools/list"))
         names = {t["name"] for t in out["result"]["tools"]}
-        assert names == {"b4a_remember", "b4a_recall", "b4a_session", "b4a_stats"}
+        assert names == {
+            "b4a_remember",
+            "b4a_recall",
+            "b4a_ask",
+            "b4a_session",
+            "b4a_stats",
+        }
 
     def test_every_tool_has_schema(self, server: Server) -> None:
         out = server.handle(rpc(1, "tools/list"))

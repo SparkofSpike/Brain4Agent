@@ -19,6 +19,7 @@ import sys
 from pathlib import Path
 
 from brain4agent.evidence import describe
+from brain4agent.read import read as read_memory
 from brain4agent.store import MemoryStore
 
 DEFAULT_DB = "brain.db"
@@ -166,6 +167,23 @@ def cmd_import(args: argparse.Namespace) -> int:
         store.close()
 
 
+def cmd_ask(args: argparse.Namespace) -> int:
+    """Retrieve then read: an answer instead of a pile of sessions."""
+    store = _open(args)
+    try:
+        result = read_memory(store, args.query, top_k=args.top_k)
+        if result.answer is None:
+            print(
+                "no model configured (set BRAIN4AGENT_LLM_KEY); use 'search' to get the evidence",
+                file=sys.stderr,
+            )
+            return 1
+        print(result.answer)
+        return 0
+    finally:
+        store.close()
+
+
 def cmd_sessions(args: argparse.Namespace) -> int:
     store = _open(args)
     try:
@@ -246,6 +264,11 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("query")
     s.add_argument("--top-k", "-k", type=int, default=3)
     s.set_defaults(func=cmd_search)
+
+    q = sub.add_parser("ask", help="retrieve and answer in one step")
+    q.add_argument("query")
+    q.add_argument("--top-k", "-k", type=int, default=5)
+    q.set_defaults(func=cmd_ask)
 
     i = sub.add_parser("import", help="bulk-load turns from JSONL")
     i.add_argument("path")

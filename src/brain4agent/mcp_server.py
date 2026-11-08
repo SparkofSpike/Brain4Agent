@@ -33,6 +33,7 @@ from pathlib import Path
 from typing import Any
 
 from brain4agent import __version__
+from brain4agent.read import read as read_memory
 from brain4agent.store import MemoryStore
 
 PROTOCOL_VERSION = "2024-11-05"
@@ -85,6 +86,23 @@ TOOLS: list[dict[str, Any]] = [
             "properties": {
                 "query": {"type": "string"},
                 "top_k": {"type": "integer", "default": 3, "minimum": 1, "maximum": 20},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "b4a_ask",
+        "description": (
+            "Retrieve and answer in one step. Slower than b4a_recall because it "
+            "runs a model over the retrieved evidence, and it will say the memory "
+            "does not contain the answer rather than guess. Use recall when you "
+            "want the raw evidence, ask when you want an answer."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string"},
+                "top_k": {"type": "integer", "default": 5, "minimum": 1, "maximum": 20},
             },
             "required": ["query"],
         },
@@ -165,6 +183,8 @@ class Server:
             return self._remember(args)
         if name == "b4a_recall":
             return self._recall(args)
+        if name == "b4a_ask":
+            return self._ask(args)
         if name == "b4a_session":
             return self._session(args)
         if name == "b4a_stats":
@@ -247,6 +267,20 @@ class Server:
             ],
         }
         return _text(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    def _ask(self, args: dict[str, Any]) -> dict[str, Any]:
+        query = _arg_str(args, "query") or ""
+        if not query:
+            raise _ToolError("query must not be empty")
+        top_k = max(1, min(_arg_int(args, "top_k", 5), 20))
+
+        result = read_memory(self.store, query, top_k=top_k)
+        if result.answer is None:
+            raise _ToolError(
+                "no model configured, so nothing can be read; use b4a_recall for the "
+                "evidence, or set BRAIN4AGENT_LLM_KEY"
+            )
+        return _text(result.answer)
 
     def _session(self, args: dict[str, Any]) -> dict[str, Any]:
         sid = _arg_str(args, "session_id") or ""
