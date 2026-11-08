@@ -7,7 +7,6 @@ only add start-up time to every assertion.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest

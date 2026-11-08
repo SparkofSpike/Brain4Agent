@@ -97,7 +97,30 @@ $ brain4agent search "杭州测试机上装的是什么数据库"
 
 `missing:` 那一行是重点。它不是「没找到」，是「语料里没有『数据库』这个词」。
 
-作为库用：
+### 给 agent 用（MCP）
+
+```json
+{"mcpServers": {"brain4agent": {
+    "command": "python",
+    "args": ["-m", "brain4agent.mcp_server"],
+    "env": {"BRAIN4AGENT_DB": "/path/to/brain.db"}
+}}}
+```
+
+四个工具：
+
+- `memory_remember` — 存一轮对话，返回 session id
+- `memory_recall` — 检索。返回证据，包含 `missing_terms`
+- `memory_session` — 读整个会话
+- `memory_stats` — 计数
+
+`memory_recall` 不告诉你「有没有答案」，它告诉你「哪些词没找到」。
+判断留给调用方——它手里已经有模型了。
+
+实现是标准库写的 stdio JSON-RPC，没装 `mcp` 包：核心加一个依赖，
+就要有一个实测数字证明它必要（D-004），而序列化四个 dict 不值得当最大的依赖。
+
+### 作为库
 
 ```python
 from brain4agent import MemoryStore
