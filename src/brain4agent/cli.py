@@ -101,26 +101,39 @@ def cmd_import(args: argparse.Namespace) -> int:
     try:
         turns = 0
         sessions: set[str] = set()
-        with store.batch(), path.open("r", encoding="utf-8-sig") as fh:
-            # utf-8-sig, and streamed rather than read whole: hand-written files
-            # often carry a BOM, and an import is the one operation likely to be
-            # pointed at a large file.
-            for lineno, line in enumerate(fh, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    obj = json.loads(line)
-                except json.JSONDecodeError as exc:
-                    print(f"line {lineno}: {exc}", file=sys.stderr)
-                    return 1
-                content = str(obj.get("content") or "").strip()
-                if not content:
-                    continue
-                sid = obj.get("session_id") or store.new_session()
-                store.add(content, session_id=sid, role=obj.get("role") or "user")
-                sessions.add(sid)
-                turns += 1
+        # One transaction for the whole file. Any bad line aborts the import and
+        # rolls back -- a half-imported history is worse than none, because the
+        # caller cannot tell how far it got.
+        try:
+            with store.batch(), path.open("r", encoding="utf-8-sig") as fh:
+                # utf-8-sig, and streamed rather than read whole: hand-written
+                # files often carry a BOM, and an import is the one operation
+                # likely to be pointed at a large file.
+                for lineno, line in enumerate(fh, 1):
+                    line = line.strip()
+                    if not line:
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError as exc:
+                        raise ValueError(f"line {lineno}: {exc}") from exc
+                    if not isinstance(obj, dict):
+                        raise ValueError(
+                            f"line {lineno}: expected a JSON object, got {type(obj).__name__}"
+                        )
+                    content = obj.get("content")
+                    if not isinstance(content, str):
+                        raise ValueError(f"line {lineno}: 'content' must be a string")
+                    content = content.strip()
+                    if not content:
+                        continue
+                    sid = obj.get("session_id") or store.new_session()
+                    store.add(content, session_id=sid, role=obj.get("role") or "user")
+                    sessions.add(sid)
+                    turns += 1
+        except ValueError as exc:
+            print(f"import aborted, nothing written: {exc}", file=sys.stderr)
+            return 1
         print(f"imported {turns} turns across {len(sessions)} sessions")
         return 0
     finally:

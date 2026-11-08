@@ -68,6 +68,28 @@ class TestStoreBasics:
         assert store.session("bulk") == []  # rolled back
         assert len(store.session("keep")) == 1  # the earlier write survives
 
+    def test_nested_batch_outer_failure_rolls_back_all(self, store: MemoryStore) -> None:
+        """An inner batch exiting must not commit what the outer one still owns.
+
+        With a boolean flag the inner exit cleared it and committed, so an outer
+        failure afterwards left the data behind.
+        """
+        with pytest.raises(RuntimeError), store.batch():
+            store.add("外层第一条", session_id="a")
+            with store.batch():
+                store.add("内层第一条", session_id="b")
+            store.add("外层第二条", session_id="c")
+            raise RuntimeError("boom")
+        assert len(store) == 0
+
+    def test_nested_batch_success_commits_once(self, store: MemoryStore) -> None:
+        with store.batch():
+            store.add("一", session_id="x")
+            with store.batch():
+                store.add("二", session_id="x")
+            store.add("三", session_id="x")
+        assert len(store) == 3
+
     def test_batch_result_persists(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             db = Path(tmp) / "b.db"
@@ -111,6 +133,38 @@ class TestStoreBasics:
                 s.prune(keep_sessions=1)
             with MemoryStore(db) as s2:
                 assert s2.stats()["sessions"] == 1
+
+    def test_content_length_is_capped(self, store: MemoryStore) -> None:
+        """A conversation turn is not a document; fail loudly rather than slowly."""
+        with pytest.raises(ValueError, match="too long"):
+            store.add("中" * 100_001, session_id="big")
+
+    def test_top_k_must_be_positive(self, store: MemoryStore) -> None:
+        store.add("内容", session_id="s1")
+        for k in (0, -1):
+            with pytest.raises(ValueError, match="top_k"):
+                store.search("内容", top_k=k)
+
+    def test_second_instance_sees_first_instances_writes(self) -> None:
+        """Two MemoryStore objects on one file must not serve stale indexes."""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "multi.db"
+            with MemoryStore(db) as a, MemoryStore(db) as b:
+                a.add("甲写入的内容", session_id="x")
+                # Ranked first, not "the only hit": both sessions share 写入的内容.
+                assert b.search("甲写入的内容").best().session_id == "x"
+
+                b.add("乙写入的内容", session_id="y")
+                assert a.search("乙写入的内容").best().session_id == "y"
+
+    def test_refresh_picks_up_sibling_writes(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            db = Path(tmp) / "multi2.db"
+            with MemoryStore(db) as a, MemoryStore(db) as b:
+                a.add("同一条", session_id="x")
+                assert len(b) == 0  # __len__ stays cheap on purpose
+                b.refresh()
+                assert len(b) == 1
 
     def test_stats(self, store: MemoryStore) -> None:
         store.add("媒体投稿界面", session_id="s1")

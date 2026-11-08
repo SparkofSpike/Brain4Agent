@@ -75,6 +75,21 @@ class TestThreeStates:
         assert r.checks == 2, f"expected 2 checks, got {r.checks}"
         assert r.verdict == "uncertain"
 
+    def test_judge_exception_becomes_uncertain(self, store: MemoryStore) -> None:
+        """An optional enhancement must not be able to break the search.
+
+        Returning None was already handled; raising was not, and a judge that
+        raised took the whole call down with it.
+        """
+
+        class BoomJudge:
+            def answer(self, question: str, evidence: str) -> bool | None:
+                raise RuntimeError("judge exploded")
+
+        r = store.search_judged("中文查询为什么搜不到", BoomJudge())
+        assert r.verdict == "uncertain"
+        assert r.checks == 1
+
     def test_empty_corpus_query_skips_judge(self, store: MemoryStore) -> None:
         """No retrieval means no judge call -- and no cost.
 

@@ -122,6 +122,14 @@ def jieba_tokens(text: str) -> list[str]:
     return [w.strip().lower() for w in jieba.lcut(text) if w.strip()]
 
 
+# jieba degrades super-linearly on long unpunctuated runs. Measured on this
+# machine: 10k identical characters took 585 ms, 20k took 2.4 s, 100k took 85 s,
+# while 50k characters of natural text takes 600 ms. A memory that hangs the
+# caller is worse than a memory indexed coarsely, so past this length the index
+# side falls back to bigrams alone -- linear, and still able to match anything.
+JIEBA_MAX_CHARS = 10_000
+
+
 def both_tokens(text: str) -> list[str]:
     """Union of bigrams and dictionary words -- the index-side tokeniser.
 
@@ -134,6 +142,8 @@ def both_tokens(text: str) -> list[str]:
     is a bias in favour of terms both tokenisers agree on, which is not the same
     as a bug, and the measured result already includes it.
     """
+    if len(text) > JIEBA_MAX_CHARS:
+        return tokenize(text)
     return tokenize(text) + jieba_tokens(text)
 
 

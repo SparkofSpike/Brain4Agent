@@ -150,6 +150,39 @@ def test_import_bad_json(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture
     assert main(["--db", str(db), "import", str(src)]) == 1
 
 
+def test_import_is_atomic(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    """A bad line must roll back everything, not leave a silent prefix."""
+    src = tmp_path / "partial.jsonl"
+    src.write_text(
+        '{"content": "第一条"}\n{"content": "第二条"}\n{broken\n',
+        encoding="utf-8",
+    )
+    assert main(["--db", str(db), "import", str(src)]) == 1
+    capsys.readouterr()
+
+    main(["--db", str(db), "stats"])
+    assert "turns    0" in capsys.readouterr().out
+
+
+def test_import_rejects_non_object(
+    db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A JSON array is valid JSON and invalid input; say so instead of crashing."""
+    src = tmp_path / "array.jsonl"
+    src.write_text('["not", "an", "object"]\n', encoding="utf-8")
+    assert main(["--db", str(db), "import", str(src)]) == 1
+    assert "expected a JSON object" in capsys.readouterr().err
+
+
+def test_import_rejects_non_string_content(
+    db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    src = tmp_path / "num.jsonl"
+    src.write_text('{"content": 42}\n', encoding="utf-8")
+    assert main(["--db", str(db), "import", str(src)]) == 1
+    assert "must be a string" in capsys.readouterr().err
+
+
 def test_import_missing_file(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--db", str(db), "import", str(tmp_path / "nope.jsonl")]) == 1
 

@@ -54,6 +54,11 @@ def _cached_tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], li
     return _tokenizers()
 
 
+# A turn of conversation is not a document. Past this, something upstream is
+# wrong (a whole file pasted in, a log dump) and a loud error beats a memory that
+# silently costs seconds per write.
+MAX_CONTENT_CHARS = 100_000
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
     id          TEXT PRIMARY KEY,
@@ -118,8 +123,15 @@ class MemoryStore:
         self._session_text: dict[str, str] = {}
         self._id_to_session: dict[str, str] = {}
         self._dirty = False
-        self._defer_commit = False
+        # A depth, not a flag: nested batch() blocks must not let the inner exit
+        # commit what the outer one is still accumulating.
+        self._defer_depth = 0
+        self._data_version = 0
         self._reload()
+
+    @property
+    def _defer_commit(self) -> bool:
+        return self._defer_depth > 0
 
     # -- lifecycle ---------------------------------------------------------
 
@@ -174,16 +186,27 @@ class MemoryStore:
 
         self._index = BM25(k1=self._k1, b=self._b, index_fn=index_fn, query_fn=query_fn)
         self._index.index_tokens(prepared)
+        self._data_version = self._db.execute("PRAGMA data_version").fetchone()[0]
         self._dirty = False
 
     def _ensure_fresh(self) -> None:
-        """Rebuild the index if writes happened since the last read.
+        """Rebuild the index if anything changed since the last read.
+
+        Two sources of change, and the second was missing: this instance's own
+        deferred writes, and writes made by *another* MemoryStore on the same
+        file. PRAGMA data_version increments only when a different connection
+        commits, which is exactly the signal needed -- an instance that never
+        writes would otherwise serve a stale index forever while a sibling
+        process updated the store.
 
         Rebuilding on every write made importing n turns cost O(n^2); deferring
-        to the next read makes it O(n) once. Nothing is rebuilt for a batch of
-        writes nobody reads.
+        to the next read makes it O(n) once.
         """
         if self._dirty:
+            self._reload()
+            return
+        version = self._db.execute("PRAGMA data_version").fetchone()[0]
+        if version != self._data_version:
             self._reload()
 
     # -- write -------------------------------------------------------------
@@ -209,6 +232,11 @@ class MemoryStore:
         text = content.strip()
         if not text:
             raise ValueError("empty content")
+        if len(text) > MAX_CONTENT_CHARS:
+            raise ValueError(
+                f"content too long: {len(text)} chars (max {MAX_CONTENT_CHARS}); "
+                "split it into turns rather than storing a document"
+            )
 
         mid = uuid.uuid4().hex
         sid = session_id or self.new_session()
@@ -250,19 +278,21 @@ class MemoryStore:
                 for turn in turns:
                     store.add(turn.text, session_id=turn.sid)
         """
-        self._defer_commit = True
+        self._defer_depth += 1
         try:
             yield self
         except BaseException:
-            # A half-written batch is worse than none: roll back and rebuild the
-            # in-memory state so it matches the database again.
-            self._defer_commit = False
-            self._db.rollback()
-            self._reload()
+            self._defer_depth -= 1
+            if self._defer_depth == 0:
+                # A half-written batch is worse than none: roll back and rebuild
+                # the in-memory state so it matches the database again.
+                self._db.rollback()
+                self._reload()
             raise
         else:
-            self._defer_commit = False
-            self._db.commit()
+            self._defer_depth -= 1
+            if self._defer_depth == 0:
+                self._db.commit()
 
     def add_exchange(
         self,
@@ -340,6 +370,8 @@ class MemoryStore:
         Returns evidence, not a verdict. Whether a session actually answers the
         question is the caller's call -- see docs/decisions.md D-011.
         """
+        if top_k < 1:
+            raise ValueError(f"top_k must be at least 1, got {top_k}")
         self._ensure_fresh()
         hits = self._index.search(query, top_k=top_k * 3)
         return build_evidence(
@@ -381,7 +413,14 @@ class MemoryStore:
         checks = 0
         for item in result.evidence[:max_checks]:
             checks += 1
-            verdict = judge.answer(query, self.session_text(item.session_id))
+            try:
+                verdict = judge.answer(query, self.session_text(item.session_id))
+            except Exception:  # noqa: BLE001 - see below
+                # A judge is an optional enhancement. Any fault in it degrades to
+                # "no judgement", never to a failed search and never to "not
+                # found". The whole three-state design exists so that a judge
+                # that cannot answer is visibly uncertain rather than invisible.
+                verdict = None
             if verdict is True:
                 kept.append(item)
                 break
@@ -405,6 +444,17 @@ class MemoryStore:
         """
         turns = self.session(session_id)
         return "\n".join(f"{m.role}: {m.content}" for m in turns)
+
+    def refresh(self) -> None:
+        """Reload from the database, picking up writes by another instance.
+
+        search() and stats() already check PRAGMA data_version and reload when a
+        sibling connection has committed. __len__ deliberately does not: the
+        pragma costs ~55us, which is fine once per query and not fine once per
+        len(). Call this if you need to observe a sibling's writes without
+        querying.
+        """
+        self._reload()
 
     def session(self, session_id: str) -> list[Memory]:
         """Turns in the session, in the order they were written.
