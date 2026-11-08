@@ -257,3 +257,121 @@ Reddy & Challaram，2026-05。标题就是论点：**别让 LLM 去跟踪新鲜�
    这是确定性的，不需要模型。
 3. 遗忘改成"重要性 × 时间衰减"，而不是按时间删最旧。
 4. 如果要对外声称检索指标，先在 MemoryArena 这类未饱和的基准上验证。
+
+---
+
+## 2026-11-08 · 第三轮：现存系统的真实成绩
+
+用户问：有没有能超越 nmem 的项目。查了开源生态与公开评测，数字来自
+`vectorize-io/agent-memory-benchmark`（AMB）的 `external_results.json`——
+一个收录各家结果并标注来源的清单。
+
+### LongMemEval 公开收录（accuracy）
+
+```
+Chronos                     0.956   ← 收录中最高
+Mastra                      0.928
+Honcho                      0.904
+Memora                      0.874
+Supermemory (Gemini-3)      0.852
+EMem-G                      0.849
+EverMemOS                   0.830
+TiMem                       0.790
+CoM (Chain-of-Memory)       0.764
+HyMem                       0.750
+Nemori                      0.746
+LiCoMemory                  0.738
+MemOS                       0.731
+ENGRAM                      0.714
+Zep                         0.712
+Mem0                        0.676
+A-MEM                       0.634
+MemoryOS                    0.612
+Full-context (GPT-4o)       0.602
+Full-context (GPT-4o-mini)  0.554
+MemoryBank                  0.229
+```
+
+### LoCoMo 公开收录
+
+```
+MemMachine v0.2 (gpt-4.1-mini)  0.917
+Honcho                          0.899
+MemMachine v0.2 (gpt-4o-mini)   0.881
+MemMachine                      0.849
+Mem0 (gpt-4.1-mini)             0.800
+Memobase                        0.758
+Zep                             0.751
+Letta                           0.740
+Mem0                            0.669
+LangMem                         0.581
+OpenAI memory                   0.529
+```
+
+### PrecisionMemBench（检索精度，噪声算硬失败）
+
+```
+open-knowledge-format   0.468
+gbrain                  0.442
+supermemory             0.273
+yourmemory              0.273
+vector                  0.143
+zep                     0.117
+atomicmemory            0.117
+agentmemory             0.091
+```
+
+### BEAM（长文档，随规模衰减）
+
+```
+            100k   500k   1M    10M
+Honcho      0.630  0.649  0.631 0.406
+LIGHT       0.358  0.359  0.336 0.266
+RAG         0.323  0.330  0.307 0.249
+```
+
+### 三个判断
+
+**1. 榜单上没有零模型系统。**
+
+从 Chronos 到 MemoryBank，全部依赖 LLM 做抽取、摘要、判断或嵌入。nmem 不在
+任何一份公开榜单里。所以"超越 nmem"这个问题本身有一半是错位的：**在功能上
+Mem0、Zep、Letta、Chronos 都远超 nmem，但它们走的是另一条路**——要模型、要
+网络、要钱。在"零模型 + 全本地"这个格子里，nmem 几乎没有对手，本项目也是。
+
+**2. 简单方案确实能赢复杂方案。**
+
+Letta 2025-08 的实验：一个只带 `grep`、`search_files`、`open`/`close` 的
+文件系统 agent，LoCoMo 74.0%；同期 Mem0 的图配置 68.5%。AMB 收录的 Letta
+是 0.740，与那个数吻合。STONE 说的"存原文、按需提取"，在工程上已经有人验证过
+一次了。
+
+**3. 精度是普遍的短板，不是本项目的。**
+
+PrecisionMemBench 里八套系统最高的才 0.468，最低 0.091——它测的是"该返回的
+必须返回，不该返回的不能返回"，即噪声。大家都擅长往上下文里灌相关内容，不擅长
+不灌无关内容。本项目的 `corpus_missing` 与可选的 `search_judged` 正对着这个
+短板，但目前只有设计，没有在这个基准上测过。
+
+### 数字本身的信任问题
+
+Mem0 的 LongMemEval 数字在不同来源之间是 0.944（自报）、0.738（Maximem 复现）、
+0.490（独立评测）——**同一个基准名，差 45 个百分点**。Mnemoverse 的总结是
+"vendor benchmark numbers have not survived reproduction so far"。
+
+AMB 自己的 README 说得很直白：分数会随 judge prompt、生成 prompt、所用模型
+小幅变动而摆动两位数，所以它把全部 prompt 与 harness 都公开了。
+
+**本项目目前的 0.925 有自己的问题**：它是在自己造的 44 会话语料上测的，
+没有第三方复现，也没有跑过公开基准。按上面这条标准，它和 Mem0 的自报数字
+属于同一类证据强度。**要对外声称，必须先跑公开 harness。**
+
+### 要做的
+
+1. 用 AMB 的 `--memory bm25` 在本机跑一次，得到一个可对标的数字。AMB 内置
+   bm25 provider，而目前榜单上没有任何纯关键词检索的条目——这是一个空位。
+2. 需要 Gemini key（AMB 用 Gemini 做生成与裁判）。没有的话要先确认能否替换，
+   或者只跑 `--mode retrieval` 的数据集（PrecisionMemBench 那条路径不需要生成
+   模型）。
+3. PrecisionMemBench 值得优先跑：它不需要 LLM 生成，纯检索断言，成本最低，
+   而且正对本项目宣称的"不灌噪声"。
