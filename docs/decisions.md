@@ -1950,6 +1950,38 @@ lists `b4a_remember`, `b4a_recall`, `b4a_ask`, `b4a_session`, `b4a_stats`.
 
 ---
 
+## D-035 The evidence tests cover the shipping implementation
+
+**Date:** 2026-11-09
+**Status:** Done
+
+**Context.** D-015 left one exception on the record: `bench/zh/evidence.py`
+kept its own `search`, because it took the benchmark's `MemoryItem` rather than
+the store's `Memory`. The note said merging would move more code than it saved.
+
+**Finding.** The exception outlived its reason. `bench/zh/e2e.py` now builds a
+`MemoryStore` and calls `store.search`; `missing_terms_signal.py` reuses that
+store. A repository-wide grep found exactly one importer of `bench.zh.evidence`:
+`tests/test_evidence.py`. The file no benchmark script called was the file the
+evidence tests covered, so the shipping `build_evidence` was only exercised
+indirectly through the store and MCP tests.
+
+**Decision.** Delete `bench/zh/evidence.py` and point `tests/test_evidence.py`
+at `brain4agent.evidence` and `MemoryStore.search`. No benchmark script changes,
+and no recorded number moves: nothing in `bench/` imported the deleted module.
+
+**Consequences.** The tests now cover `question_terms`, per-session
+`missing_terms`, `corpus_missing`, `coverage` bounds, `top_k`, session-level
+evidence and score ordering against the code that ships. The bench copy's
+`term_in_corpus` helper has no direct counterpart; `corpus_missing` is the
+shipping expression of the same question.
+
+**Not done.** No `MemoryItem` adapter. There is no caller left to justify one;
+if a future benchmark needs to score a list of turns without a store, adding the
+adapter then is cheaper than keeping a second implementation now.
+
+---
+
 ## D-036 Access counts belong to the turn that matched
 
 **Date:** 2026-11-09
