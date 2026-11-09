@@ -193,6 +193,10 @@ def cmd_import(args: argparse.Namespace) -> int:
 
         {"session_id": "s1", "role": "assistant", "content": "..."}
 
+    Other keys are ignored. ``role`` is validated here for the same reason the
+    ``add`` command restricts it: a typo stored today is a session read back
+    with an impossible role tomorrow.
+
     A missing session_id starts a new session. Imported as one transaction --
     a thousand individual commits costs more than the thousand writes.
     """
@@ -232,7 +236,12 @@ def cmd_import(args: argparse.Namespace) -> int:
                     if not content:
                         continue
                     sid = obj.get("session_id") or store.new_session()
-                    store.add(content, session_id=sid, role=obj.get("role") or "user")
+                    role = obj.get("role") or "user"
+                    if role not in {"user", "assistant", "system"}:
+                        raise ValueError(
+                            f"line {lineno}: 'role' must be user, assistant or system, got {role!r}"
+                        )
+                    store.add(content, session_id=sid, role=role)
                     sessions.add(sid)
                     turns += 1
         except ValueError as exc:

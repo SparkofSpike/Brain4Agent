@@ -183,6 +183,19 @@ def test_import_rejects_non_string_content(
     assert "must be a string" in capsys.readouterr().err
 
 
+def test_import_rejects_bad_role(
+    db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """A typo'd role must abort, not be stored and read back as an impossible one."""
+    src = tmp_path / "role.jsonl"
+    src.write_text('{"role": "assitant", "content": "typo"}\n', encoding="utf-8")
+    assert main(["--db", str(db), "import", str(src)]) == 1
+    assert "must be user, assistant or system" in capsys.readouterr().err
+
+    main(["--db", str(db), "stats"])
+    assert "turns    0" in capsys.readouterr().out
+
+
 def test_import_missing_file(db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     assert main(["--db", str(db), "import", str(tmp_path / "nope.jsonl")]) == 1
 
