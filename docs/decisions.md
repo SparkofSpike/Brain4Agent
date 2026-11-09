@@ -628,12 +628,10 @@ past.
 `bench/` now depends on `src/`. `pyproject.toml` sets `pythonpath = ["src"]` so
 the scripts run from a checkout.
 
-**Not done**
-
-`bench/zh/evidence.py` keeps its own `search`, because it takes the benchmark's
-`MemoryItem` rather than the store's `Memory`. Both `question_terms`
-implementations agree but are written twice. Merging now would move more code
-than it saves.
+**Superseded by D-035.** The exception above did not last: by the time it was
+re-examined, `bench/zh/evidence.py` had no benchmark caller left -- only the
+evidence tests imported it -- so it was deleted and those tests now run against
+`brain4agent.evidence` and `MemoryStore.search`.
 
 ---
 
@@ -2002,12 +2000,16 @@ memory".
 2. Count only the turn that matched. Requires the evidence row to carry its id.
 
 **Decision.** Option 2. The session is the retrieval unit, but the fact being
-recorded is which memory earned the retrieval. Reinforcement and pruning are
-per-memory operations; crediting the opening turn puts both on the wrong row.
+recorded is which memory row the retrieval is credited to. Reinforcement and
+pruning are per-memory operations; crediting the opening turn puts both on the
+wrong row. On a superseded hit the credit goes to the replacement, because that
+is the row a caller can act on, even though the score came from the old one.
 
 **Implementation.** `Evidence.matched_memory_id` is filled by `build_evidence`
 and used by `_annotate`, with `memory.id` as the fallback for hand-built
-evidence. No ranking change: `accesses` still does not feed BM25.
+evidence. The field is appended after `possible_duplicates` so the fifth
+positional argument of `Evidence` keeps its meaning. No ranking change:
+`accesses` still does not feed BM25.
 
 **Verified.** `test_credits_the_matching_turn_not_the_first`: first turn 0,
 matching turn 1. The existing single-turn access-count tests are unchanged.

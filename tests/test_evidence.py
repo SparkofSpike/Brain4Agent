@@ -14,7 +14,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from brain4agent import MemoryStore
-from brain4agent.evidence import describe, question_terms
+from brain4agent.evidence import Evidence, SearchResult, describe, question_terms
 
 
 def _seeded(tmp_path: Path) -> MemoryStore:
@@ -102,8 +102,9 @@ class TestSearch:
     def test_corpus_missing_is_not_session_missing(self, tmp_path: Path) -> None:
         """D-018: absent from one session says nothing about the corpus."""
         with _seeded(tmp_path) as store:
-            r = store.search("媒体投稿界面的部署目录", top_k=3)
-            assert r.corpus_missing == []
+            r = store.search("媒体投稿界面的部署目录 数据库", top_k=3)
+            assert r.corpus_missing == ["数据库"]
+            assert "部署" not in r.corpus_missing
             by_session = {e.session_id: e.missing_terms for e in r.evidence}
             assert "部署" in by_session["s2"]
             assert "媒体" in by_session["s1"]
@@ -117,3 +118,33 @@ class TestDescribe:
     def test_mentions_missing(self, tmp_path: Path) -> None:
         with _seeded(tmp_path) as store:
             assert "数据库" in describe(store.search("杭州测试机上装的是什么数据库？", top_k=1))
+
+
+class TestAccessFallback:
+    def test_annotate_credits_memory_id_when_no_match_id(self, tmp_path: Path) -> None:
+        """A hand-built Evidence has no matched id; the counter falls back."""
+        with _seeded(tmp_path) as store:
+            mid = store.add("单独的一条记忆", session_id="s9")
+            mem = store.memory(mid)
+            assert mem is not None
+            store._annotate(
+                SearchResult(
+                    query="q",
+                    evidence=[Evidence(mem, 1.0, 1.0)],
+                    corpus_terms=1,
+                    sessions_searched=1,
+                )
+            )
+            assert store.memory(mid).accesses == 1  # type: ignore[union-attr]
+
+    def test_positional_arguments_keep_their_meaning(self) -> None:
+        """`possible_duplicates` stays the fifth positional field."""
+
+        class _Mem:
+            id = "m1"
+            session_id = "s1"
+            content = "x"
+
+        e = Evidence(_Mem(), 1.0, 1.0, [], ["dup-of-x"])
+        assert e.possible_duplicates == ["dup-of-x"]
+        assert e.matched_memory_id == ""
