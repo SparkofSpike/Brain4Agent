@@ -123,7 +123,10 @@ class TestDescribe:
 
     def test_mentions_missing(self, tmp_path: Path) -> None:
         with _seeded(tmp_path) as store:
-            assert "数据库" in describe(store.search("杭州测试机上装的是什么数据库？", top_k=1))
+            text = describe(store.search("杭州测试机上装的是什么数据库？", top_k=1))
+            # 数据 is the substring both tokenisers produce: 数据库 with jieba,
+            # 数据 + 据库 without it.
+            assert "数据" in text
 
 
 class TestAccessFallback:
