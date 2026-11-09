@@ -934,7 +934,12 @@ class MemoryStore:
         # duplicates_of(id) directly; no MCP tool exposes it.
         enriched = list(result.evidence)
 
-        ids = [(e.memory.id,) for e in result.evidence]
+        # Credit the turn that matched, not the session's first turn. Evidence
+        # carries `memory` = the first turn so a caller has something readable
+        # to show, and an earlier version counted every retrieval against it:
+        # a query matching only the second turn of a session incremented the
+        # first turn and left the matching one at zero.
+        ids = [((e.matched_memory_id or e.memory.id),) for e in result.evidence]
         with self._db:
             self._db.executemany("UPDATE memories SET accesses = accesses + 1 WHERE id = ?", ids)
         return dc_replace(result, evidence=enriched)

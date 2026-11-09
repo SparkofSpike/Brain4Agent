@@ -121,3 +121,15 @@ class TestAccessCount:
             s.search("主库")
         with MemoryStore(path) as s:
             assert s.memory(mid).accesses == 1  # type: ignore[union-attr]
+
+    def test_credits_the_matching_turn_not_the_first(self, tmp_path: Path) -> None:
+        """Evidence is per session; the count belongs to the turn that matched."""
+        with MemoryStore(tmp_path / "a.db") as s:
+            sid = s.new_session()
+            first = s.add("部署在哪台机器", session_id=sid)
+            second = s.add("部署在 192.0.2.10 这台机器", session_id=sid)
+            hits = s.search("192.0.2.10")
+            assert hits.evidence
+            assert hits.evidence[0].matched_memory_id == second
+            assert s.memory(second).accesses == 1  # type: ignore[union-attr]
+            assert s.memory(first).accesses == 0  # type: ignore[union-attr]
