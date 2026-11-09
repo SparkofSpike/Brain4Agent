@@ -5,9 +5,14 @@ name: release
 # machine. PyPI has to be told once, out of band, that this repository and this
 # workflow file are allowed to publish -- see docs/release.md.
 #
-# The alternative, a PYPY_API_TOKEN secret plus `twine upload`, is one forgotten
-# rotation away from a leaked credential. Here the credential is a short-lived
-# OIDC token that PyPI issues to this job for the length of the job.
+# Two guards, both learned from real failures:
+#
+#   1. The tag must match the version in pyproject.toml. A typo otherwise burns a
+#      version number permanently, because PyPI never lets a filename be reused.
+#   2. If the version is already on PyPI, the publish job is skipped and the run
+#      succeeds. This matters after a history rewrite: re-pushing an existing tag
+#      re-triggers this workflow, and PyPI answers 400 File already exists. That
+#      is not a release failure, it is a release that already happened.
 
 on:
   push:
@@ -26,6 +31,9 @@ jobs:
   build:
     name: build
     runs-on: ubuntu-latest
+    outputs:
+      exists: ${{ steps.published.outputs.exists }}
+      version: ${{ steps.version.outputs.version }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -35,21 +43,39 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install build
-        run: python -m pip install --upgrade build
-
-      - name: Build sdist and wheel
-        run: python -m build --sdist --wheel --outdir dist/
+      - name: Read the version
+        id: version
+        run: |
+          version=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version: $version"
 
       - name: Check the tag matches the version
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
           tag="${GITHUB_REF#refs/tags/v}"
-          version=$(python -c "import tomllib,pathlib;print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          version="${{ steps.version.outputs.version }}"
           if [ "$tag" != "$version" ]; then
             echo "tag v$tag does not match pyproject version $version" >&2
             exit 1
           fi
+
+      - name: Is this version already on PyPI?
+        id: published
+        run: |
+          version="${{ steps.version.outputs.version }}"
+          if curl -fsS "https://pypi.org/pypi/brain4agent/$version/json" > /dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Already published::brain4agent $version is on PyPI; the publish step will be skipped."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Install build
+        run: python -m pip install --upgrade build
+
+      - name: Build sdist and wheel
+        run: python -m build --sdist --wheel --outdir dist/
 
       - name: Check the wheel installs and the CLI runs
         run: |
@@ -66,6 +92,7 @@ jobs:
   publish:
     name: publish
     needs: build
+    if: needs.build.outputs.exists != 'true'
     runs-on: ubuntu-latest
     environment:
       name: pypi
