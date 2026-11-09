@@ -183,14 +183,17 @@ def test_import_rejects_non_string_content(
     assert "must be a string" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("role", ['"assitant"', '["user"]', '""', "42"])
 def test_import_rejects_bad_role(
-    db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+    role: str, db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """A typo'd role must abort, not be stored and read back as an impossible one."""
+    """A bad role must abort cleanly, including a non-string or empty one."""
     src = tmp_path / "role.jsonl"
-    src.write_text('{"role": "assitant", "content": "typo"}\n', encoding="utf-8")
+    src.write_text('{"role": ' + role + ', "content": "typo"}\n', encoding="utf-8")
     assert main(["--db", str(db), "import", str(src)]) == 1
-    assert "must be user, assistant or system" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert "import aborted, nothing written" in err
+    assert "must be user, assistant or system" in err
 
     main(["--db", str(db), "stats"])
     assert "turns    0" in capsys.readouterr().out

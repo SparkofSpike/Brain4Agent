@@ -236,8 +236,14 @@ def cmd_import(args: argparse.Namespace) -> int:
                     if not content:
                         continue
                     sid = obj.get("session_id") or store.new_session()
-                    role = obj.get("role") or "user"
-                    if role not in {"user", "assistant", "system"}:
+                    role = obj.get("role")
+                    if role is None:
+                        role = "user"
+                    if not isinstance(role, str) or role not in {
+                        "user",
+                        "assistant",
+                        "system",
+                    }:
                         raise ValueError(
                             f"line {lineno}: 'role' must be user, assistant or system, got {role!r}"
                         )
