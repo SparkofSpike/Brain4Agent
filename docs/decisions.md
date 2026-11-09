@@ -1515,15 +1515,17 @@ neurons. Two of those are worth having here, and two are not:
 
 **Decision, part one: detect, do not merge.** A SimHash fingerprint is computed
 at write time and stored. `duplicates_of(id)` returns memories within a Hamming
-distance of 10, and every `Evidence` carries `possible_duplicates`.
+distance of 10. `Evidence` keeps a `possible_duplicates` field for callers that
+fill it, but search leaves it empty: the scan measured 5 ms against 2893
+memories, more than half of a query that otherwise takes 4 ms, and it answers a
+maintenance question rather than a retrieval one.
 
 **No automatic merge, and this is the important half.** Merging is irreversible.
 The store has no standing to decide that two memories state the same fact — that
 requires reading both and judging, which is what the calling agent does for a
 living. What the agent could not do was notice. Now it can.
 
-The feedback loop is the point: search returns `possible_duplicates`, the agent
-reads them, and if they are the same thing it calls `supersede()`. The store never
+The feedback loop is the point: the agent asks `duplicates_of(id)`, reads them, and if they are the same thing it calls `supersede()`. The store never
 guesses.
 
 **Decision, part two: count accesses, do not rank by them.** Every search
@@ -1548,7 +1550,7 @@ Two implementation notes worth keeping:
 measured against this corpus. On the one hand-constructed example (a changed IP
 address) it separates correctly: 5 bits apart for a one-character edit, 30 bits
 apart for a different topic. Whether that holds across the real corpus, and
-whether 10 is the right cut, is unmeasured. Until then `possible_duplicates` is a
+whether 10 is the right cut, is unmeasured. Until then `duplicates_of` is a
 hint, and the README says so.
 ---
 

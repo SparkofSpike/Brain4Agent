@@ -94,7 +94,8 @@ class Evidence:
     # Memories whose text is close enough to this one that they may be saying the
     # same thing. Reported, not resolved: the caller has a model and can read both
     # and decide. Silently merging would be irreversible and this store has no
-    # standing to make that call.
+    # standing to make that call. Search never fills this in -- the corpus-wide
+    # scan costs more than a query (D-028). Call MemoryStore.duplicates_of(id).
     possible_duplicates: list[str] = field(default_factory=list)
 
     @property
