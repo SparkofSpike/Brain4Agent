@@ -55,8 +55,13 @@ RULES: list[tuple[str, re.Pattern[str]]] = [
     ),
     (
         "non-reserved IP address",
+        # Excluded: loopback, RFC 1918 private, and the three RFC 5737
+        # documentation ranges (192.0.2/24, 198.51.100/24, 203.0.113/24). The
+        # documentation ranges are what the README samples use, and leaving them
+        # out made this hook refuse its own repository.
         re.compile(
-            r"\b(?!127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.|255\.)"
+            r"\b(?!127\.|10\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|0\.|255\."
+            r"|192\.0\.2\.|198\.51\.100\.|203\.0\.113\.)"
             r"(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b"
         ),
     ),

@@ -293,8 +293,7 @@ belong in git, and the fetcher reproduces it byte-for-byte.
 **On this benchmark, retrieval is not the hard part.** 96.6% of answers are in
 the top ten.
 
-That sentence used to appear here as a general claim, and it was wrong. It holds
-for this benchmark and does not transfer:
+It holds for this benchmark and does not transfer:
 
 | benchmark | metric | this store | best third-party |
 |---|---|---|---|
@@ -353,18 +352,9 @@ This store beats every third-party system on both columns. **It does not beat
 the benchmark's own reference implementation**, which scores 43/43 and 77/77,
 and there would be no reason to expect it to.
 
-**A correction worth spelling out.** Earlier versions of this README quoted
-numbers from AMB's `external_results.json` — gbrain 0.4416, supermemory 0.2727,
-zep 0.1169, and 0.4675 as "the highest published" — and compared this store's
-**active** rate (0.7907) against those **total** rates. That is two errors in one
-sentence. The numbers disagree with the benchmark's own site (it records gbrain
-at 11/77, not 34/77), and the site is authoritative. And the two columns have
-different denominators: 0.4675 is 36/77 total, while open-knowledge-format's
-active rate is 18/43 = 0.4186.
-
-Both columns are now given side by side so the comparison cannot be mixed again.
-The claim this supports is narrower than the one it replaces: **best third-party
-result on this benchmark**, not "beat the state of the art".
+The two columns have different denominators — 34/43 active is not 34/77 — so
+both are given. The claim is **best third-party result on this benchmark**, not
+"beat the state of the art".
 
 ### LoCoMo — retrieval
 
@@ -384,11 +374,10 @@ MRR     0.7369
 accuracy under an LLM judge with its own backbone and prompt; these measure
 whether the right session was retrieved.
 
-A caution about the tempting inference, because this README made it and was
-wrong. `hit@5 = 0.8850` is **not** a ceiling on anyone's answer accuracy — only on
-a reader that sees exactly five sessions and is forbidden to reason beyond them.
-This store's own `hit@10 = 0.9471` already exceeds MemMachine's 0.9169, which is
-the same store, so the bound says nothing about a different system's retrieval.
+`hit@5 = 0.8850` is **not** a ceiling on anyone's answer accuracy — only on a
+reader that sees exactly five sessions and is forbidden to reason beyond them.
+This store's own `hit@10 = 0.9471` already exceeds MemMachine's 0.9169, so the
+bound says nothing about a different system's retrieval.
 Published LoCoMo numbers are not evidence about retrieval quality in either
 direction.
 
@@ -441,23 +430,17 @@ all** ("did the downstream components need changes?" — answered "no"), so ther
 is nothing to supply. And of the 17 that do, BM25 still ranks the right session
 first less than half the time.
 
-Four fixes were measured and rejected: BM25 length normalisation (no effect),
-recency tie-break (cost 0.25 on the clean corpus), a concreteness bonus
-(recovered one question, cost 0.025), and oracle entity injection. See
+Four query-side fixes were tried and none helped; the list is in
 [D-020](docs/decisions.md#d-020-bag-of-words-retrieval-degrades-on-dense-same-topic-corpora)
 and [D-021](docs/decisions.md#d-021-oracle-entities-recover-15-the-failure-is-not-missing-literals).
 
-Practical consequence, **revised after D-025 and D-026**: BM25 is adequate when a
-topic appears once or twice in the corpus. When it does not, the fix is at write
-time, not at query time.
+Practical consequence: BM25 is adequate when a topic appears once or twice in the
+corpus. When it does not, the fix is at write time, not at query time.
 
-This section originally concluded that BM25 could not handle dense near-duplicates
-at all. That was too strong, and PrecisionMemBench is the counter-example: 35
-beliefs, near-identical subjects, the same word `redis` in two different
-memories. The same BM25 scores 0.8312 there once memories carry scope tags,
-supersession links and relation refs, and once the index holds the belief's names
-rather than its prose. Four query-side fixes were measured and every one failed —
-BM25 parameter sweeps, coverage thresholds, score ratios, missing-term ratios.
+PrecisionMemBench is the counter-example: 35 beliefs, near-identical subjects, the
+same word `redis` in two different memories. The same BM25 scores 0.8312 there
+once memories carry scope tags, supersession links and relation refs, and once the
+index holds the belief's names rather than its prose.
 
 The 0.000 above is real. It is what *untagged* BM25 does to a corpus where every
 document is about the same subject. Read the top five, weight `corpus_missing`
