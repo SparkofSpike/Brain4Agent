@@ -128,12 +128,13 @@ imported 4 turns across 2 sessions
 }}}
 ```
 
-四个工具：
+五个工具：
 
 | 工具 | 用途 |
 |---|---|
 | `b4a_remember` | 存一轮对话；返回会话 id |
 | `b4a_recall` | 检索；返回会话，附带 `corpus_missing` 和每个会话的 `missing_terms` |
+| `b4a_ask` | 一步完成检索与作答；需要模型，没配置时如实说明 |
 | `b4a_session` | 按顺序读出一个完整会话 |
 | `b4a_stats` | 计数 |
 
@@ -556,7 +557,8 @@ README 是推销页。
 **最近新增：**
 
 - **近重复检测。** 每条记忆一个 SimHash 指纹；两条记忆可能在说
-  同一件事时，`search` 返回 `possible_duplicates`。只报告，不合并——
+  同一件事时，`duplicates_of(id)` 会返回它们（不放在检索路径上：全库扫描在
+  2893 条记忆上是 5 ms，超过一次查询耗时的一半）。只报告，不合并——
   调用方 agent 自己读两条再决定（D-028）。
 - **weight（权重）。** `reinforce` 提高它，`decay` 降低它，
   `prune_by_weight` 删除跌破阈值的记忆。这是本项目第一个
@@ -600,7 +602,7 @@ README 是推销页。
   有没有回来；没有一个说明 reader 用得对不对。那需要一个 judge，
   而一个会判错的 judge 比没有更糟。
 
-[决策日志](docs/decisions.md)记录了 26 条，两个方向都有——
+[决策日志](docs/decisions.md)记录了 34 条，两个方向都有——
 包括测过并失败的假设。[研究笔记](docs/research.md)和
 [版图分析](docs/landscape.md)覆盖周边领域。
 
@@ -611,7 +613,7 @@ LoCoMo hit@1 是 0.6270，没有超过该数据集上公开的最好答案准确
 
 ## 设计决策
 
-26 条决策，每条都附背后的测量或推理，见
+34 条决策，每条都附背后的测量或推理，见
 [`docs/decisions.md`](docs/decisions.md)。两个方向都记录——
 包括测过并失败的假设。
 

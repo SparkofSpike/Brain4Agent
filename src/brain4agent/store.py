@@ -931,7 +931,7 @@ class MemoryStore:
         # linear scan over the corpus -- 5 ms against 2893 memories, more than
         # half the cost of a query that otherwise takes 4 ms -- and it answers a
         # maintenance question, not a retrieval one. Callers that want it call
-        # duplicates_of(id), or the MCP tool exposes it separately.
+        # duplicates_of(id) directly; no MCP tool exposes it.
         enriched = list(result.evidence)
 
         ids = [(e.memory.id,) for e in result.evidence]

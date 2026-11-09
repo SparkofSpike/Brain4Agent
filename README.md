@@ -130,12 +130,13 @@ imported 4 turns across 2 sessions
 }}}
 ```
 
-Four tools:
+Five tools:
 
 | Tool | Purpose |
 |---|---|
 | `b4a_remember` | Store one turn; returns a session id |
 | `b4a_recall` | Search; returns sessions with `corpus_missing` and per-session `missing_terms` |
+| `b4a_ask` | Retrieve and answer in one step; needs a model, and says so when none is configured |
 | `b4a_session` | Read a whole session in order |
 | `b4a_stats` | Counts |
 
@@ -567,9 +568,11 @@ first benchmarks were written.
 
 **Recently added:**
 
-- **Near-duplicate detection.** A SimHash fingerprint per memory; `search` returns
-  `possible_duplicates` when two memories may state the same thing. It reports and
-  does not merge — the calling agent reads both and decides (D-028).
+- **Near-duplicate detection.** A SimHash fingerprint per memory; `duplicates_of(id)`
+  returns the memories that may state the same thing. It reports and does not
+  merge — the calling agent reads both and decides (D-028). It is not on the
+  search path: a corpus-wide scan cost 5 ms against 2893 memories, more than half
+  of a query.
 - **Weight.** `reinforce` raises it, `decay` lowers it, `prune_by_weight` deletes
   what fell below a threshold. This is the first forgetting signal here that is
   not about age: a retrieved memory survives, an unretrieved one decays (D-029).
@@ -611,7 +614,7 @@ first benchmarks were written.
   here says whether the right memory came back; none says whether the reader used
   it well. That needs a judge, and a judge that is wrong is worse than none.
 
-The [decision log](docs/decisions.md) records 26 entries in both directions —
+The [decision log](docs/decisions.md) records 34 entries in both directions —
 including the hypotheses that were tested and failed. The
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the surrounding field.
@@ -623,7 +626,7 @@ answer accuracy on that dataset — and the gap there is retrieval, not reading.
 
 ## Design decisions
 
-Twenty-six decisions, each with the measurement or reasoning behind it, in
+Thirty-four decisions, each with the measurement or reasoning behind it, in
 [`docs/decisions.md`](docs/decisions.md). Both directions are recorded —
 including the hypotheses that were tested and failed.
 
