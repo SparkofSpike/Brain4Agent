@@ -92,6 +92,34 @@ class TestTools:
         turns = json.loads(text_of(out))
         assert len(turns) == 2
 
+    def test_remember_keeps_tags_when_distilling(
+        self, server: Server, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """`distil: true` must not drop the caller's tags.
+
+        With no key configured -- the default install -- the distilling path
+        degrades to storing the raw turn, and the tags used to disappear on the
+        way through `store.remember`. An untagged memory is never excluded by a
+        tag filter (`_visible`), so a write scoped to one project silently became
+        visible in every scope.
+        """
+        monkeypatch.delenv("BRAIN4AGENT_LLM_KEY", raising=False)
+        out = call(
+            server,
+            "b4a_remember",
+            {"content": "主库是 PostgreSQL", "distil": True, "tags": ["scope:code"]},
+        )
+        assert out["result"]["isError"] is False, text_of(out)
+        sid = text_of(out).split()[-1]
+        assert server.store.session(sid)[0].tags == ("scope:code",)
+
+        hit = call(server, "b4a_recall", {"query": "主库", "tags": ["scope:code"]})
+        assert json.loads(text_of(hit))["found"] is True
+        # A different scope must not see it. With tags dropped it was untagged,
+        # and untagged memories match every filter.
+        other = call(server, "b4a_recall", {"query": "主库", "tags": ["scope:ops"]})
+        assert json.loads(text_of(other))["found"] is False
+
     def test_recall_returns_evidence(self, server: Server) -> None:
         call(server, "b4a_remember", {"content": "中文查询搜不到，根因在 keywords.py"})
         out = call(server, "b4a_recall", {"query": "中文查询为什么搜不到"})

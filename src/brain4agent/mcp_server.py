@@ -243,7 +243,11 @@ class Server:
         tags = _arg_str_list(args, "tags")
         try:
             if distil:
-                ids = self.store.remember(content, session_id=sid, role=role)
+                # Tags must survive distillation. They are the caller's knowledge
+                # about scope, not text the extractor could infer, and dropping
+                # them silently made `distil: true` + `tags` write memories that
+                # no tag filter could ever find again.
+                ids = self.store.remember(content, session_id=sid, role=role, tags=tags)
             else:
                 ids = [self.store.add(content, session_id=sid, role=role, tags=tags)]
         except ValueError as exc:  # empty, too long, tag with a space
