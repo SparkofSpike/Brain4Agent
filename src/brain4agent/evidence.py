@@ -87,26 +87,27 @@ class Evidence:
     knowing 用户 somewhere else means the concept is not unknown.
 
     ``memory`` is the session's first turn, kept so a caller has something to
-    show; ``matched_memory_id`` names the turn whose score put the session here.
-    The two differ whenever the match is not on the opening turn.
+    show; ``matched_memory_id`` names the memory row the retrieval is credited
+    to (the replacement, if the hit was superseded). The two differ whenever the
+    match is not on the opening turn.
     """
 
     memory: _MemoryLike
     score: float
     coverage: float
     missing_terms: list[str] = field(default_factory=list)
-    # The turn that actually matched, which is not necessarily ``memory``:
-    # evidence is reported per session, and ``memory`` is the session's first
-    # turn so the caller has something readable to show. Access counting needs
-    # the matched turn -- crediting the first turn counted a search for an IP
-    # address against the question above it.
-    matched_memory_id: str = ""
     # Memories whose text is close enough to this one that they may be saying the
     # same thing. Reported, not resolved: the caller has a model and can read both
     # and decide. Silently merging would be irreversible and this store has no
     # standing to make that call. Search never fills this in -- the corpus-wide
     # scan costs more than a query (D-028). Call MemoryStore.duplicates_of(id).
     possible_duplicates: list[str] = field(default_factory=list)
+    # The memory row this session's retrieval is credited to -- not necessarily
+    # ``memory``, which is the session's first turn kept for readability. On a
+    # superseded hit this is the replacement: the score belongs to the old row,
+    # but the credit belongs to the row that is current. Kept after
+    # ``possible_duplicates`` so the fifth positional field does not change.
+    matched_memory_id: str = ""
 
     @property
     def session_id(self) -> str:
