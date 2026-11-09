@@ -26,6 +26,7 @@ import urllib.request
 from pathlib import Path
 
 from bench.zh.loader import load_zh
+from brain4agent.llm import first_choice_text
 
 RESULTS = Path(__file__).parent.parent / "results"
 # Config location is resolved at runtime, never hard-coded: this file
@@ -128,8 +129,7 @@ def judge(
         print(f"    [api error] body was {type(body).__name__}: {raw[:100]!r}")
         return None, dt, 0, 0
 
-    choices = body.get("choices") or [{}]
-    text = (choices[0].get("message", {}).get("content") or "").strip().upper()
+    text = first_choice_text(body).upper()
     usage = body.get("usage") or {}
     verdict = True if text.startswith("YES") else False if text.startswith("NO") else None
     return verdict, dt, int(usage.get("prompt_tokens", 0)), int(usage.get("completion_tokens", 0))

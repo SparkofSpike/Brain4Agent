@@ -147,3 +147,22 @@ class TestJudgeConfig:
         monkeypatch.setattr(j, "_post", lambda *_a, **_k: None)
         assert j.answer("q", "e") is None
         assert j.stats()["errors"] == 1
+
+
+class TestJudgeParse:
+    """A malformed body is "could not decide", never a crash in the caller."""
+
+    @pytest.mark.parametrize(
+        "body",
+        [
+            {"choices": [{"message": None}]},
+            {"choices": {"message": {"content": "YES"}}},
+            {"choices": [{"message": {"content": ["YES"]}}]},
+            {"choices": 5},
+            {"choices": []},
+        ],
+    )
+    def test_malformed_body_returns_none(self, body: object) -> None:
+        j = Judge("k")
+        j._post = lambda *_a, **_k: body  # type: ignore[method-assign]
+        assert j.answer("q", "e") is None
