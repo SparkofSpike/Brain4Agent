@@ -122,7 +122,14 @@ class LLM:
 
             if isinstance(body, dict):
                 choices = body.get("choices") or [{}]
-                text = (choices[0].get("message", {}).get("content") or "").strip()
+                first = choices[0] if isinstance(choices[0], dict) else {}
+                # A provider may send "message": null on a truncated or filtered
+                # response. `.get("message", {})` returns None when the key
+                # exists with a null value, so the default only covers a missing
+                # key -- an explicit null used to escape as AttributeError.
+                message = first.get("message")
+                content = message.get("content") if isinstance(message, dict) else ""
+                text = (content or "").strip()
                 if text:
                     return text
                 # Empty content with a non-empty reasoning budget is a truncation,
