@@ -183,7 +183,7 @@ def test_import_rejects_non_string_content(
     assert "must be a string" in capsys.readouterr().err
 
 
-@pytest.mark.parametrize("role", ['"assitant"', '["user"]', '""', "42"])
+@pytest.mark.parametrize("role", ['"assitant"', '["user"]', '""', "42", "null"])
 def test_import_rejects_bad_role(
     role: str, db: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]
 ) -> None:
