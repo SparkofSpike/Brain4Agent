@@ -65,3 +65,27 @@ def test_non_dict_choice_returns_none(monkeypatch: pytest.MonkeyPatch) -> None:
     llm = _llm(monkeypatch, {"choices": ["not an object"]})
     assert llm.chat("system", "user") is None
     assert llm.errors == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        {"choices": {"message": {"content": "x"}}},
+        {"choices": 5},
+        {"choices": True},
+        {"choices": None},
+        {"choices": [{"message": "not a dict"}]},
+        {"choices": [{"message": {"content": ["x"]}}]},
+        {"choices": [{"message": {"content": 42}}]},
+    ],
+)
+def test_malformed_bodies_return_none(monkeypatch: pytest.MonkeyPatch, payload: object) -> None:
+    """A response that parses but has the wrong shape is an outage, not a crash.
+
+    `choices` is not guaranteed to be a list of objects, and `content` is not
+    guaranteed to be a string. The helper absorbs every shape; these pin the
+    ones that used to raise KeyError, TypeError or AttributeError.
+    """
+    llm = _llm(monkeypatch, payload)
+    assert llm.chat("system", "user") is None
+    assert llm.errors == 1

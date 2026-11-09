@@ -39,6 +39,29 @@ class LLMConfig:
     retries: int = DEFAULT_RETRIES
 
 
+def first_choice_text(body: object) -> str:
+    """The first choice's message text, or "" for any other shape.
+
+    A provider response is not a contract: ``choices`` can be absent, null, a
+    dict or a scalar, and ``content`` can be null or a non-string. Every caller
+    that reads a completion goes through here, so a malformed body becomes an
+    empty answer instead of a crash.
+    """
+    if not isinstance(body, dict):
+        return ""
+    choices = body.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return ""
+    first = choices[0]
+    if not isinstance(first, dict):
+        return ""
+    message = first.get("message")
+    if not isinstance(message, dict):
+        return ""
+    content = message.get("content")
+    return content.strip() if isinstance(content, str) else ""
+
+
 class LLM:
     """Synchronous chat completion over HTTP.
 
@@ -121,15 +144,7 @@ class LLM:
                 self.last_latency = time.perf_counter() - started
 
             if isinstance(body, dict):
-                choices = body.get("choices") or [{}]
-                first = choices[0] if isinstance(choices[0], dict) else {}
-                # A provider may send "message": null on a truncated or filtered
-                # response. `.get("message", {})` returns None when the key
-                # exists with a null value, so the default only covers a missing
-                # key -- an explicit null used to escape as AttributeError.
-                message = first.get("message")
-                content = message.get("content") if isinstance(message, dict) else ""
-                text = (content or "").strip()
+                text = first_choice_text(body)
                 if text:
                     return text
                 # Empty content with a non-empty reasoning budget is a truncation,

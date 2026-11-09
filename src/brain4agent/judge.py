@@ -30,6 +30,8 @@ import time
 import urllib.error
 import urllib.request
 
+from brain4agent.llm import first_choice_text
+
 DEFAULT_BASE_URL = "https://api.deepseek.com"
 DEFAULT_MODEL = "deepseek-flash"
 
@@ -142,8 +144,7 @@ class Judge:
             self.errors += 1
             return None
 
-        choices = body.get("choices") or [{}]
-        text = (choices[0].get("message", {}).get("content") or "").strip().upper()
+        text = first_choice_text(body).upper()
         if text.startswith("YES"):
             return True
         if text.startswith("NO"):
