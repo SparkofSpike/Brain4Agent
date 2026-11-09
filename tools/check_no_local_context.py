@@ -18,6 +18,14 @@ Install once:
 The hook reads every staged file as bytes and refuses the commit on a match.
 Exit 0 to allow, 1 to block with the offending lines printed.
 
+Also usable outside git, which is how the release workflow checks a built
+distribution before it is uploaded:
+
+    python -m tools.check_no_local_context --scan-dir dist/
+    python -m tools.check_no_local_context --scan-archive dist/*.tar.gz
+
+A package can ship a README or a test fixture that the git hook never saw.
+
 Deliberate exemptions live in ALLOW below: text explaining what the pattern is,
 or a public default path that happens to share a name. They are matched against
 the whole path plus line, so be specific.
@@ -104,6 +112,49 @@ def scan(path: str, text: str) -> list[tuple[int, str, str]]:
     return hits
 
 
+def _scan_paths(paths: list[Path], label: str) -> list[str]:
+    problems: list[str] = []
+    for full in paths:
+        if not full.is_file():
+            continue
+        try:
+            text = full.read_text("utf-8")
+        except (UnicodeDecodeError, OSError):
+            continue
+        rel = full.as_posix()
+        for lineno, kind, line in scan(rel, text):
+            problems.append(f"  {rel}:{lineno}  [{kind}]  {line}")
+    return problems
+
+
+def _scan_archive(archive: Path) -> list[str]:
+    import tarfile
+    import zipfile
+
+    problems: list[str] = []
+    if archive.suffix == ".whl" or zipfile.is_zipfile(archive):
+        with zipfile.ZipFile(archive) as zf:
+            for name in zf.namelist():
+                try:
+                    text = zf.read(name).decode("utf-8")
+                except (UnicodeDecodeError, KeyError):
+                    continue
+                for lineno, kind, line in scan(name, text):
+                    problems.append(f"  {archive.name}:{name}:{lineno}  [{kind}]  {line}")
+    else:
+        with tarfile.open(archive) as tf:
+            for member in tf.getmembers():
+                if not member.isfile():
+                    continue
+                try:
+                    text = tf.extractfile(member).read().decode("utf-8")
+                except (UnicodeDecodeError, AttributeError):
+                    continue
+                for lineno, kind, line in scan(member.name, text):
+                    problems.append(f"  {archive.name}:{member.name}:{lineno}  [{kind}]  {line}")
+    return problems
+
+
 def main(argv: list[str]) -> int:
     if "--install" in argv:
         hook = ROOT / ".git" / "hooks" / "pre-commit"
@@ -117,6 +168,19 @@ def main(argv: list[str]) -> int:
         hook.chmod(0o755)
         print(f"installed {hook}")
         return 0
+
+    if "--scan-dir" in argv:
+        i = argv.index("--scan-dir")
+        target = Path(argv[i + 1]).resolve()
+        label = str(target)
+        problems = _scan_paths([f for f in target.rglob("*")], label)
+        return _report(problems, label)
+
+    if "--scan-archive" in argv:
+        i = argv.index("--scan-archive")
+        target = Path(argv[i + 1]).resolve()
+        problems = _scan_archive(target)
+        return _report(problems, str(target))
 
     problems: list[str] = []
     for path in staged_files():
@@ -132,10 +196,13 @@ def main(argv: list[str]) -> int:
         for lineno, label, line in scan(path, text):
             problems.append(f"  {path}:{lineno}  [{label}]  {line}")
 
+    return _report(problems, "staged files")
+
+
+def _report(problems: list[str], label: str) -> int:
     if not problems:
         return 0
-
-    print("Refusing to commit: this content belongs to one machine, not to a", file=sys.stderr)
+    print(f"Refusing {label}: this content belongs to one machine, not to a", file=sys.stderr)
     print("published package. Remove it, or add a narrow entry to ALLOW in", file=sys.stderr)
     print("tools/check_no_local_context.py if the match is legitimate.", file=sys.stderr)
     print("", file=sys.stderr)

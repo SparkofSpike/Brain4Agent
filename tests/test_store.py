@@ -226,13 +226,13 @@ class TestChineseSearch:
 
 class TestMissingTerms:
     def test_reports_absent_term(self, store: MemoryStore) -> None:
-        store.add("杭州那台测试机的地址是 114.215.175.63", session_id="s1")
+        store.add("杭州那台测试机的地址是 203.0.113.42", session_id="s1")
         r = store.search("杭州测试机上装的是什么数据库")
         assert "数据库" in r.best().missing_terms
         assert "数据库" in r.corpus_missing
 
     def test_no_missing_when_present(self, store: MemoryStore) -> None:
-        store.add("杭州测试机的地址是 114.215.175.63", session_id="s1")
+        store.add("杭州测试机的地址是 203.0.113.42", session_id="s1")
         r = store.search("杭州测试机的地址")
         assert "地址" not in r.best().missing_terms
         assert "地址" not in r.corpus_missing

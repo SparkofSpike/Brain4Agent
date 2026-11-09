@@ -102,7 +102,7 @@ class TestTools:
 
     def test_recall_reports_missing_terms(self, server: Server) -> None:
         """The whole reason this server exists: say which word is absent."""
-        call(server, "b4a_remember", {"content": "杭州测试机的地址是 114.215.175.63"})
+        call(server, "b4a_remember", {"content": "杭州测试机的地址是 203.0.113.42"})
         out = call(server, "b4a_recall", {"query": "杭州测试机上装的是什么数据库"})
         payload = json.loads(text_of(out))
         assert "数据库" in payload["corpus_missing"]
