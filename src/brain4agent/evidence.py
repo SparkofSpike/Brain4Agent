@@ -85,12 +85,22 @@ class Evidence:
     which explains why it is ranked where it is, but is not by itself evidence
     that the memory is absent. A session missing 用户 is normal; the corpus
     knowing 用户 somewhere else means the concept is not unknown.
+
+    ``memory`` is the session's first turn, kept so a caller has something to
+    show; ``matched_memory_id`` names the turn whose score put the session here.
+    The two differ whenever the match is not on the opening turn.
     """
 
     memory: _MemoryLike
     score: float
     coverage: float
     missing_terms: list[str] = field(default_factory=list)
+    # The turn that actually matched, which is not necessarily ``memory``:
+    # evidence is reported per session, and ``memory`` is the session's first
+    # turn so the caller has something readable to show. Access counting needs
+    # the matched turn -- crediting the first turn counted a search for an IP
+    # address against the question above it.
+    matched_memory_id: str = ""
     # Memories whose text is close enough to this one that they may be saying the
     # same thing. Reported, not resolved: the caller has a model and can read both
     # and decide. Silently merging would be irreversible and this store has no
@@ -290,6 +300,7 @@ def build_evidence(
                 score=score,
                 coverage=round(covered / total_weight, 4),
                 missing_terms=missing,
+                matched_memory_id=memory_id,
             )
         )
         if len(evidence) >= top_k:

@@ -1947,3 +1947,35 @@ artifact. It is not a runtime dependency and no code path reads it.
 **Verified.** `b4a search` for a memory known to be in the import returns three
 sessions from the main store; the MCP handshake reports the configured path and
 lists `b4a_remember`, `b4a_recall`, `b4a_ask`, `b4a_session`, `b4a_stats`.
+
+---
+
+## D-036 Access counts belong to the turn that matched
+
+**Date:** 2026-11-09
+**Status:** Done
+
+**Context.** A review of PR #1 found that `_annotate` incremented
+`Evidence.memory.id`, while `Evidence.memory` is the session's first turn.
+
+**Finding.** Two-turn session, query matching only the second turn: after one
+search `accesses` was 1 on the first turn and 0 on the turn that contained the
+answer. The field is documented as "how many times a search has returned this
+memory".
+
+**Options.**
+
+1. Count every turn in a returned session. Matches "the session is the unit of
+   retrieval", but inflates the counter and credits turns that did not match.
+2. Count only the turn that matched. Requires the evidence row to carry its id.
+
+**Decision.** Option 2. The session is the retrieval unit, but the fact being
+recorded is which memory earned the retrieval. Reinforcement and pruning are
+per-memory operations; crediting the opening turn puts both on the wrong row.
+
+**Implementation.** `Evidence.matched_memory_id` is filled by `build_evidence`
+and used by `_annotate`, with `memory.id` as the fallback for hand-built
+evidence. No ranking change: `accesses` still does not feed BM25.
+
+**Verified.** `test_credits_the_matching_turn_not_the_first`: first turn 0,
+matching turn 1. The existing single-turn access-count tests are unchanged.
