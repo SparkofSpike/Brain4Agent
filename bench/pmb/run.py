@@ -33,6 +33,7 @@ time. Nothing is inferred from the query, and no model is involved.
 
 from __future__ import annotations
 
+import argparse
 import sys
 import tempfile
 from collections import Counter
@@ -106,7 +107,24 @@ def index_text(belief: dict) -> str:
     return " ".join(p for p in [cn, aliases] if p)
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(
+        description="PrecisionMemBench, scored through the shipping store."
+    )
+    ap.add_argument(
+        "--min-pass",
+        type=float,
+        default=0.0,
+        help="exit non-zero if the pass rate falls below this (use in CI)",
+    )
+    ap.add_argument(
+        "--min-active",
+        type=float,
+        default=0.0,
+        help="exit non-zero if the active pass rate falls below this (use in CI)",
+    )
+    args = ap.parse_args(argv)
+
     beliefs, cases = load()
     name_sets = {b["_id"]: name_set(b) for b in beliefs}
     print(f"corpus: {len(beliefs)} beliefs · cases: {len(cases)}")
@@ -211,6 +229,16 @@ def main() -> int:
         if len(failures) > 10:
             print(f"  ... and {len(failures) - 10} more")
 
+    # A printed number nobody can fail on is a report, not a gate. Same shape as
+    # bench/zh/e2e.py: 0.0 by default, so a plain run still just reports.
+    pass_rate = passed / n if n else 0.0
+    active_rate = active_passed / active_total if active_total else 0.0
+    if pass_rate < args.min_pass:
+        print(f"FAIL: pass {pass_rate:.4f} is below the required {args.min_pass:.4f}")
+        return 1
+    if active_rate < args.min_active:
+        print(f"FAIL: active {active_rate:.4f} is below the required {args.min_active:.4f}")
+        return 1
     return 0
 
 
