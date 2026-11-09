@@ -236,9 +236,9 @@ def cmd_import(args: argparse.Namespace) -> int:
                     if not content:
                         continue
                     sid = obj.get("session_id") or store.new_session()
-                    role = obj.get("role")
-                    if role is None:
-                        role = "user"
+                    # Default only when the key is absent. An explicit null is a
+                    # bad value, not a missing one, and must reach the check.
+                    role = obj.get("role", "user")
                     if not isinstance(role, str) or role not in {
                         "user",
                         "assistant",
