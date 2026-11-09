@@ -77,6 +77,17 @@ jobs:
       - name: Build sdist and wheel
         run: python -m build --sdist --wheel --outdir dist/
 
+      - name: Refuse to publish anything that names this machine
+        # The git hook only sees commits. A package is not a commit: two releases
+        # shipped a real server IP inside test fixtures that the hook had never
+        # been asked about. This opens the actual wheel and sdist and applies the
+        # same rules to what a user will download.
+        run: |
+          python -m tools.check_no_local_context --scan-dir dist/
+          for f in dist/*; do
+            python -m tools.check_no_local_context --scan-archive "$f"
+          done
+
       - name: Check the wheel installs and the CLI runs
         run: |
           python -m venv /tmp/check
