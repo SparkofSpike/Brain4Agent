@@ -19,3 +19,7 @@ dist/
 # Local agent operating instructions. Project-specific paths, environment
 # details and commit discipline -- useful here, noise in a public tree.
 AGENTS.md
+
+# Local memory stores: never publish private remembered context
+.neuralmemory/
+*.nm

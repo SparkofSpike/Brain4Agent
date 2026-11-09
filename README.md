@@ -1,10 +1,12 @@
 # Brain4Agent
 
+**English** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
+
 Long-term memory for agents. CJK-first retrieval, no model in the core path,
 and evidence instead of confidence scores.
 
-`pip install -e ".[precise]"` requires Python 3.11+ and one optional dictionary.
-Without it, everything still works.
+`pip install "Brain4Agent[precise]"` requires Python 3.11+ and one optional
+dictionary. Without it, everything still works.
 
 ---
 

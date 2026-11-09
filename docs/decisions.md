@@ -1719,8 +1719,8 @@ With both `neural-memory` and `b4a` enabled, the agent answered:
 
 Five memories were in the `b4a` store at that moment. It had queried nmem,
 received nothing relevant, and reported that as the state of memory — while
-citing `203.0.113.10` for an unrelated project, which is a fact from the nmem
-brain.
+citing a test-server address belonging to an unrelated project, which is a
+fact from the nmem brain.
 
 Direct protocol test confirmed `b4a` was healthy: a hand-written MCP handshake
 returned the correct two sessions. The failure was at selection, not at retrieval.
@@ -1911,11 +1911,11 @@ a "34 mojibake rows" figure again.
 **Context.** Switching the machine's memory from nmem to b4a. Before editing the
 config I checked where the two servers actually read from.
 
-**Finding.** `mcp.json` set `BRAIN4AGENT_DB` to `/var/lib/b4a\tmp\b4a-real.db`.
-That file does not exist. The 2893 imported memories were in `b4a-nmem.db`. So
-every b4a tool call since the import had been creating an empty database at a new
-path and answering from it. The import in D-033 was real, and the memories were
-real, but the MCP server was not reading them.
+**Finding.** `mcp.json` set `BRAIN4AGENT_DB` to a path that did not exist. The
+2893 imported memories were in a different file, and the configured one had
+never been created. So every b4a tool call since the import had been creating an
+empty database at that path and answering from it. The import in D-033 was real,
+and the memories were real, but the MCP server was not reading them.
 
 **Why it survived a session.** The empty store answers every query honestly:
 zero results, `corpus_missing` listing the terms. An empty store and a store
@@ -1923,9 +1923,9 @@ that has never heard of something produce the same evidence. D-031 found that
 two memory servers confuse tool selection; this is the same failure one layer
 down -- the server was selected correctly and read the wrong file.
 
-**Fix.** `b4a.db` is now the main store, copied from `b4a-nmem.db`, and
-`BRAIN4AGENT_DB` points at it. `b4a-nmem.db` stays untouched as the experiment
-corpus for `bench/nmem/` and as a rollback point.
+**Fix.** The configured path is now the main store, copied from the import file,
+and `BRAIN4AGENT_DB` points at it. The import file stays untouched as the
+experiment corpus for `bench/nmem/` and as a rollback point.
 
 **Migration policy.** nmem is deprecated. Its 2893 usable fibers are imported
 into b4a, and `neural-memory` is set to `disabled: true` in `mcp.json` so it is
@@ -1939,9 +1939,9 @@ adds no capability and one more way to be wrong. Where b4a lacks something --
 cross-session aggregation, recap-style summaries -- the answer is that it lacks
 it, not that nmem should cover the gap.
 
-`b4a-nmem.db` stays on disk as the corpus for `bench/nmem/` and as a rollback
+The import file stays on disk as the corpus for `bench/nmem/` and as a rollback
 artifact. It is not a runtime dependency and no code path reads it.
 
-**Verified.** `b4a search` for a known ProjectX_3.0 memory returns 3 sessions from the
-main store; the MCP handshake reports `db=/var/lib/b4a\tmp\b4a.db` and lists
-`b4a_remember`, `b4a_recall`, `b4a_ask`, `b4a_session`, `b4a_stats`.
+**Verified.** `b4a search` for a memory known to be in the import returns three
+sessions from the main store; the MCP handshake reports the configured path and
+lists `b4a_remember`, `b4a_recall`, `b4a_ask`, `b4a_session`, `b4a_stats`.

@@ -22,7 +22,7 @@ class TestTokenizer:
     def test_latin_digits_kept(self) -> None:
         """Digits inside a word stay part of it; v2rayN is one token."""
         assert tokenize("v2rayN") == ["v2rayn"]
-        assert "geo_3" in tokenize("ProjectX_3.0")[0] or "geo" in tokenize("ProjectX_3.0")[0]
+        assert "projectx_3" in tokenize("ProjectX_3.0")[0] or "geo" in tokenize("ProjectX_3.0")[0]
 
     def test_chinese_produces_bigrams(self) -> None:
         assert tokenize("媒体投稿") == ["媒体", "体投", "投稿"]
