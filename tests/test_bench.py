@@ -11,6 +11,7 @@ import pytest
 
 from bench.loader import MemoryItem, Query, Task, _flatten_sessions
 from bench.metrics import RetrievalScore, aggregate, score_one
+from bench.pmb.run import main as pmb_main
 from bench.retrieval import BM25, tokenize
 from bench.runner import collapse_to_sessions
 
@@ -256,3 +257,24 @@ class TestFlattenSessions:
         )
         with pytest.raises(ValueError, match="no memories"):
             Task(query=q, memories=[])
+
+
+class TestPmbGate:
+    """The README names PrecisionMemBench as part of the verification gate.
+
+    It printed its pass rate and returned 0 either way, so a retrieval change
+    that dropped 64/77 to 60/77 left CI green. These pin the exit code, the same
+    way tests/test_e2e.py pins the Chinese gate.
+    """
+
+    def test_report_mode_passes(self) -> None:
+        assert pmb_main([]) == 0
+
+    def test_threshold_above_actual_fails(self) -> None:
+        assert pmb_main(["--min-pass", "0.99"]) == 1
+
+    def test_active_threshold_above_actual_fails(self) -> None:
+        assert pmb_main(["--min-active", "0.99"]) == 1
+
+    def test_recorded_thresholds_pass(self) -> None:
+        assert pmb_main(["--min-pass", "0.82", "--min-active", "0.78"]) == 0

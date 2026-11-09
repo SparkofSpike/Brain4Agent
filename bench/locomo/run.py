@@ -39,6 +39,7 @@ D-025's scope filter doing real work rather than serving a benchmark.
 
 from __future__ import annotations
 
+import argparse
 import json
 import sys
 import tempfile
@@ -115,7 +116,16 @@ def score(queries: list[dict], retrieved: dict[str, list[str]]) -> dict[str, obj
     }
 
 
-def main() -> int:
+def main(argv: list[str] | None = None) -> int:
+    ap = argparse.ArgumentParser(description="LoCoMo retrieval, scored through the shipping store.")
+    ap.add_argument(
+        "--min-hit1",
+        type=float,
+        default=0.0,
+        help="exit non-zero if hit@1 falls below this (use in CI)",
+    )
+    args = ap.parse_args(argv)
+
     documents, queries = load()
     turns = sum(len(json.loads(d["content"])) for d in documents)
     print(f"corpus: {len(documents)} sessions · {turns} turns")
@@ -142,6 +152,12 @@ def main() -> int:
     print()
     print("These are retrieval numbers. Published LoCoMo scores (0.67-0.92) measure")
     print("answer accuracy under an LLM judge and are NOT comparable to them.")
+
+    # Reported numbers need a way to fail, or CI only prints them. 0.0 keeps a
+    # bare `python -m bench.locomo.run` a report rather than a gate.
+    if r["hit@1"] < args.min_hit1:
+        print(f"FAIL: hit@1 {r['hit@1']:.4f} is below the required {args.min_hit1:.4f}")
+        return 1
     return 0
 
 

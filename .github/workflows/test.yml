@@ -48,3 +48,12 @@ jobs:
         # A change to tokenisation, scoring or evidence that lowers hit@1 below
         # the recorded baseline fails the build instead of being noticed later.
         run: python -m bench.zh.e2e --min-hit1 0.92
+
+      - name: PrecisionMemBench and LoCoMo regression
+        # README names all three benchmarks as the gate. Only the Chinese one
+        # could fail the build: the other two printed their numbers and returned
+        # 0 regardless, so a drop from 64/77 or from hit@1 0.6270 shipped green.
+        # Thresholds sit just under the recorded values, like the one above.
+        run: |
+          python -m bench.pmb.run --min-pass 0.82 --min-active 0.78
+          python -m bench.locomo.run --min-hit1 0.62
