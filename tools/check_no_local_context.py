@@ -36,7 +36,10 @@ ROOT = Path(__file__).resolve().parents[1]
 RULES: list[tuple[str, re.Pattern[str]]] = [
     (
         "machine-local path",
-        re.compile(r"\b[A-Za-z]:\\(?:Users|DataRoot|Coding)\\"),
+        # Any drive-letter path. Naming the specific top-level directories would
+        # put those names back into the repository this rule exists to keep them
+        # out of.
+        re.compile(r"\b[A-Za-z]:\\(?!\\)[A-Za-z_.]"),
     ),
     (
         "home directory with a username",
