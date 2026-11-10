@@ -413,7 +413,7 @@ python -m bench.locomo.run
 
 ## 특별 감사
 
-@nhadaututtheky의
+[nhadaututtheky](https://github.com/nhadaututtheky)의
 [neural-memory](https://github.com/nhadaututtheky/neural-memory)에 감사한다.
 이 프로젝트는 그곳의 버그 수정에서
 시작됐다: 중국어 질의가 키워드 정규식에 한자 범위가 없어 아무것도 반환하지

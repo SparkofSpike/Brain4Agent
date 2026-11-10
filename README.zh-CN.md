@@ -404,7 +404,7 @@ API key，也不需要网络。改动某条设计决策，应该在 `docs/decisi
 
 ## 特别致谢
 
-感谢 @nhadaututtheky 的
+感谢 [nhadaututtheky](https://github.com/nhadaututtheky) 的
 [neural-memory](https://github.com/nhadaututtheky/neural-memory)。
 本项目始于那里的一次 bug 修复：
 中文查询返回空，因为关键词正则没有汉字范围。它的 brain 也是
