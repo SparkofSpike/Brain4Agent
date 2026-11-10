@@ -396,10 +396,8 @@ multi-retriever fusion, a recall scheduler, time-decayed forgetting.
 **Measured and rejected:** query-time graph traversal (D-024), write-time
 extraction (D-023).
 
-**Recent fix:** `supersede(old, new)` redirects hits to the new memory instead
-of returning nothing when the wording changed (D-027).
-
-The [decision log](docs/decisions.md) records 36 entries; the
+Release history is in [CHANGELOG.md](CHANGELOG.md). The
+[decision log](docs/decisions.md) records 36 entries; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the field.
 

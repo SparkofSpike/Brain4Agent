@@ -383,11 +383,8 @@ hit@10 已经饱和；只有 hit@1 和 MRR 有区分度。
 
 **测过并否决：** 查询时图遍历（D-024）、写入时抽取（D-023）。
 
-**最近修复：** 新记忆换了词时，`supersede(old, new)` 现在把命中重定向到
-新记忆，而不是什么也不返回（D-027）。
-
-[决策日志](docs/decisions.md)记录了 36 条；[研究笔记](docs/research.md)和
-[版图分析](docs/landscape.md)覆盖周边领域。
+发布历史见 [CHANGELOG.md](CHANGELOG.md)。[决策日志](docs/decisions.md)记录了
+36 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
 
 ## 参与贡献
 

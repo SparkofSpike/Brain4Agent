@@ -390,9 +390,7 @@ hit@10은 포화 상태이고, hit@1과 MRR만 변별력을 가진다.
 
 **측정 후 기각:** 질의 시점 그래프 순회(D-024), 쓰기 시점 추출(D-023).
 
-**최근 수정:** 새 기억이 다른 단어를 쓸 때 `supersede(old, new)`는 아무것도
-반환하지 않는 대신 적중을 새 기억으로 리다이렉트한다(D-027).
-
+릴리스 이력은 [CHANGELOG.md](CHANGELOG.md)에 있다.
 [결정 로그](docs/decisions.md)는 36개 항목을 기록한다.
 [연구 노트](docs/research.md)와 [지형 분석](docs/landscape.md)은 주변 분야를
 다룬다.
