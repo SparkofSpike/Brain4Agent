@@ -12,8 +12,17 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   appears in. It is the evidence an agent needs when a two-word query returns a
   pile of same-topic memories: the word is too common, not missing and not
   misspelt (D-039).
+- `SearchResult.related_terms` lists words the top sessions use that the query
+  did not, and `b4a_recall` rows carry `tags`, `created_at` and `kind` from the
+  turn that matched (D-040).
+- `bench/real/probe.py` measures keyword-query retrieval against a real store
+  without committing its contents.
 
 ### Changed
+
+- `b4a_remember` writes `date:`, `kind:` and `project:` tags automatically.
+  `project` comes from the argument or `BRAIN4AGENT_PROJECT`. The library's
+  `add()` is unchanged; only the MCP tool adds the labels (D-040).
 
 - Chinese retrieval: hit@1 0.9250 → 0.9500, hit@5 0.9750 → 1.0000, MRR
   0.9404 → 0.9613. Question words (哪个/为什么/哪里/什么) are dropped from the

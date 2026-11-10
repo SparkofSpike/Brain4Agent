@@ -2199,3 +2199,47 @@ whether to rephrase.
 2898 rows carry a literal `nmem-tag:["build" ...]` string instead of structured
 labels, so scope filtering cannot help. Repairing that is a data migration, not a
 retrieval change, and it needs the owner's approval.
+
+## D-040 Structure at write time, evidence at read time
+
+**Date:** 2026-11-10
+**Status:** Shipped; ranking unchanged
+
+**Context.** D-039 measured the real query distribution: two keywords, no
+question, 2898 memories, hit@1 0.27. Coverage re-ranking and MMR both failed to
+move it, because the failure is not ranking — the query does not name enough to
+separate same-topic memories. Two things were missing: the memories had no
+structured labels, and the caller had no evidence about which words would help.
+
+**Write side.** `b4a_remember` now adds `date:`, `kind:` and `project:` tags
+automatically. `project` comes from the `project` argument or the
+`BRAIN4AGENT_PROJECT` environment variable; `kind` is stored both as a column and
+a tag, so a tag filter can select decisions or errors without a separate index.
+The store's own `add()` is unchanged: a library caller still gets exactly the
+tags it passed, and only the agent-facing MCP tool adds the labels. That
+boundary matters — automatic labels are a convenience for an agent, not a
+silent rewrite of the storage API.
+
+**Read side.** `b4a_recall` rows now carry `tags`, `created_at` and `kind` from
+the turn that matched, and `SearchResult.related_terms` lists up to five words
+the top sessions use that the query did not. That is the third word a two-word
+query needs, taken from the corpus rather than guessed.
+
+**Cost.** Related terms are computed from the top two sessions, capped at 300
+characters and cached by text. Warm query latency on the Chinese fixture is
+1.9 ms. Re-segmenting on every query measured 24 ms, which is why the cache
+exists; the cache is keyed by text, not session id, so a changed session cannot
+reuse a stale entry.
+
+**Real-store probe.** `bench/real/probe.py` derives keyword queries from a store
+and reports hit@1 by query length. On the local 2898-memory store: 2 words
+0.275, 3 words 0.525, 4 words 0.650. Run it on a copy — `search` increments
+access counters, so even a read writes. No memory text and no fixture is
+committed.
+
+**Not changed.** Ranking. The D-037/D-038 order stands; this entry adds what the
+caller knows and what the store can say, not a new scorer.
+
+**What remains.** The local store's tags are free-form (`trms`, `geo_3.0`,
+`bug`). Nothing enforces a vocabulary, and nothing maps a new memory to an
+existing project tag. A schema on `kind` remains unbuilt, as the README says.

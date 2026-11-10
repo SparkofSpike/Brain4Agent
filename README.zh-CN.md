@@ -222,6 +222,8 @@ if judge:
 - **`term_frequencies`**——每个问题词出现在多少条会话里。一个词出现在 2898 条
   记忆中的 453 条，既不是缺失也不是拼错，而是太泛、区分不了任何东西，查询需要
   再加一个词（D-039）。
+- **`related_terms`**——top 会话里用了、而查询没说的词，最多五个。这就是两词
+  查询需要的第三个词，从语料里取，不是猜的（D-040）。
 
 是否拒答由调用方决定；存储层只报告事实。
 
@@ -400,7 +402,7 @@ hit@10 已经饱和；只有 hit@1 和 MRR 有区分度。
 切块检索（D-037）、用 store 自己的分词器跑 LongMemEval（D-037）。
 
 发布历史见 [CHANGELOG.md](CHANGELOG.md)。[决策日志](docs/decisions.md)记录了
-39 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
+40 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
 
 ## 参与贡献
 
