@@ -20,7 +20,9 @@ read it without knowing what a BM25 score of 13.4 means.
 from __future__ import annotations
 
 import math
+from collections import Counter
 from dataclasses import dataclass, field
+from functools import lru_cache
 from typing import Protocol
 
 from brain4agent.tokenize import INTERROGATIVES as _INTERROGATIVE
@@ -126,6 +128,10 @@ class SearchResult:
     # common -- GEO appears in 42 sessions, so the query needs a third word, not
     # a better ranking. Reported as a count, not advice (D-039).
     term_frequencies: dict[str, int] = field(default_factory=dict)
+    # Words the top sessions use that the query did not. A query of two words
+    # often needs a third to separate same-topic memories; these are the
+    # candidates the corpus itself offers (D-040).
+    related_terms: list[str] = field(default_factory=list)
 
     @property
     def empty(self) -> bool:
@@ -214,6 +220,18 @@ def question_terms(query: str) -> list[str]:
     seen: set[str] = set()
     unique = [t for t in terms if not (t in seen or seen.add(t))]
     return sorted(unique, key=len, reverse=True)
+
+
+@lru_cache(maxsize=256)
+def _session_words(text: str) -> tuple[str, ...]:
+    """Words of one session, cached by text.
+
+    Re-segmenting the same two sessions on every query was 10 ms of a 24 ms
+    lookup. Keyed by text rather than session id so a session that changes does
+    not reuse a stale entry; 300 characters is enough to see what a memory is
+    about without paying for the tail.
+    """
+    return tuple(word_tokens(text[:300]))
 
 
 def build_evidence(
@@ -307,6 +325,21 @@ def build_evidence(
             break
 
     corpus_terms = sum(1 for t in q_terms if any(t in x for x in texts))
+    related_terms: list[str] = []
+    if evidence:
+        counts: Counter[str] = Counter()
+        q_set = set(q_terms)
+        for row in evidence[:2]:
+            text = session_text.get(row.session_id, "")
+            for word in _session_words(text):
+                if len(word) < 2 or word in q_set:
+                    continue
+                if word in _FILLER or word in _INTERROGATIVE:
+                    continue
+                if not any(ch.isalpha() for ch in word):
+                    continue
+                counts[word] += 1
+        related_terms = [word for word, _ in counts.most_common(5)]
     return SearchResult(
         query=query,
         evidence=evidence,
@@ -314,6 +347,7 @@ def build_evidence(
         sessions_searched=sessions_searched,
         corpus_missing=corpus_missing,
         term_frequencies=term_frequencies,
+        related_terms=related_terms,
     )
 
 

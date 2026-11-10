@@ -467,15 +467,17 @@ class BM25:
         self._idf = {
             term: math.log(1.0 + (self._n - df + 0.5) / (df + 0.5)) for term, df in self._df.items()
         }
-        # Candidates for the fuzzy path. Built once per index, ASCII letters only
-        # and the same six-letter floor as the query side -- at five, the normal
-        # inflection errors -> error counted as a misspelling and expanded.
+        # Candidates for the fuzzy path. Built once per index, ASCII letters only.
+        # Five is deliberate: English inflection (errors -> error) is one edit and
+        # is a legitimate match -- raising this to six cost LoCoMo one case, and
+        # skipping plural forms cost five. The reviewer flagged the inflection as
+        # a defect; the measurement says it helps.
         self._fuzzy_vocab: dict[str, int] = {}
         if self.fuzzy:
             self._fuzzy_vocab = {
                 term: df
                 for term, df in self._df.items()
-                if len(term) >= 6 and term.isascii() and term.isalpha()
+                if len(term) >= 5 and term.isascii() and term.isalpha()
             }
 
     def _expand(self, terms: list[str]) -> list[str]:

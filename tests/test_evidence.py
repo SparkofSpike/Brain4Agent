@@ -82,6 +82,14 @@ class TestSearch:
             r = store.search("zzzqqq", top_k=1)
             assert r.term_frequencies == {"zzzqqq": 0}
 
+    def test_related_terms_offer_words_the_query_lacks(self, tmp_path: Path) -> None:
+        """The corpus suggests the third word a two-word query needs (D-040)."""
+        with _seeded(tmp_path) as store:
+            r = store.search("媒体 投稿", top_k=2)
+            assert r.related_terms
+            assert "媒体" not in r.related_terms
+            assert "投稿" not in r.related_terms
+
     def test_empty_corpus_query_returns_no_evidence(self, tmp_path: Path) -> None:
         with _seeded(tmp_path) as store:
             r = store.search("zzzz", top_k=3)

@@ -29,6 +29,7 @@ import json
 import os
 import sys
 import traceback
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -80,6 +81,22 @@ TOOLS: list[dict[str, Any]] = [
                         "can filter on them. Use them for what the text does not say: "
                         "which project, which domain. An untagged memory matches any "
                         "tag filter."
+                    ),
+                },
+                "kind": {
+                    "type": "string",
+                    "default": "raw",
+                    "description": (
+                        "What kind of memory this is: raw, decision, error, preference. "
+                        "Also written as a kind: tag so retrieval can filter on it."
+                    ),
+                },
+                "project": {
+                    "type": "string",
+                    "description": (
+                        "Project this memory belongs to. Defaults to the "
+                        "BRAIN4AGENT_PROJECT environment variable. Written as a "
+                        "project: tag."
                     ),
                 },
             },
@@ -161,6 +178,7 @@ class Server:
 
     def __init__(self, db_path: Path | None = None) -> None:
         self.store = MemoryStore(db_path or default_db())
+        self.project = os.environ.get("BRAIN4AGENT_PROJECT") or None
 
     # -- protocol ----------------------------------------------------------
 
@@ -223,6 +241,24 @@ class Server:
 
     # -- tools -------------------------------------------------------------
 
+    def _structured_tags(self, tags: list[str], kind: str, project: str | None) -> list[str]:
+        """Add the labels the caller should not have to repeat (D-040).
+
+        When and where a memory was written are facts the store already has.
+        Writing them as tags is what makes a later two-word query filterable
+        instead of ranking 453 memories by word frequency.
+        """
+        merged = list(tags)
+
+        def add(prefix: str, value: str | None) -> None:
+            if value and not any(t.startswith(prefix) for t in merged):
+                merged.append(f"{prefix}{value}")
+
+        add("date:", datetime.now(UTC).strftime("%Y-%m-%d"))
+        add("kind:", kind)
+        add("project:", project or self.project)
+        return merged
+
     def _remember(self, args: dict[str, Any]) -> dict[str, Any]:
         content = _arg_str(args, "content") or ""
         if not content:
@@ -243,7 +279,8 @@ class Server:
         if not isinstance(distil, bool):
             raise _ToolError("'distil' must be a boolean")
 
-        tags = _arg_str_list(args, "tags")
+        kind = _arg_str(args, "kind") or "raw"
+        tags = self._structured_tags(_arg_str_list(args, "tags"), kind, _arg_str(args, "project"))
         try:
             if distil:
                 # Tags must survive distillation. They are the caller's knowledge
@@ -252,13 +289,34 @@ class Server:
                 # no tag filter could ever find again.
                 ids = self.store.remember(content, session_id=sid, role=role, tags=tags)
             else:
-                ids = [self.store.add(content, session_id=sid, role=role, tags=tags)]
+                ids = [self.store.add(content, session_id=sid, role=role, tags=tags, kind=kind)]
         except ValueError as exc:  # empty, too long, tag with a space
             raise _ToolError(str(exc)) from exc
 
         if not ids:
             return _text(f"nothing durable in that turn -- not stored (session {sid})")
         return _text(f"stored {len(ids)} memories in session {sid}")
+
+    def _evidence_row(self, evidence: Any) -> dict[str, Any]:
+        """One result row, with the metadata a caller needs to judge it.
+
+        The tags and timestamp come from the turn that matched, not the
+        session's opening turn; a memory's labels are the reason it is in or
+        out of scope, so the row should name the row they belong to.
+        """
+        memory = (
+            self.store.memory(evidence.matched_memory_id or evidence.memory.id) or evidence.memory
+        )
+        return {
+            "session_id": evidence.session_id,
+            "score": round(evidence.score, 3),
+            "coverage": evidence.coverage,
+            "missing_terms": evidence.missing_terms,
+            "tags": list(memory.tags),
+            "created_at": memory.created_at,
+            "kind": memory.kind,
+            "text": self.store.session_text(evidence.session_id),
+        }
 
     def _recall(self, args: dict[str, Any]) -> dict[str, Any]:
         query = _arg_str(args, "query") or ""
@@ -277,6 +335,7 @@ class Server:
                         "sessions_searched": result.sessions_searched,
                         "corpus_missing": result.corpus_missing,
                         "term_frequencies": result.term_frequencies,
+                        "related_terms": result.related_terms,
                         "note": (
                             "no session shares any term with the query"
                             if not result.corpus_missing
@@ -294,16 +353,8 @@ class Server:
             "sessions_searched": result.sessions_searched,
             "corpus_missing": result.corpus_missing,
             "term_frequencies": result.term_frequencies,
-            "evidence": [
-                {
-                    "session_id": e.session_id,
-                    "score": round(e.score, 3),
-                    "coverage": e.coverage,
-                    "missing_terms": e.missing_terms,
-                    "text": self.store.session_text(e.session_id),
-                }
-                for e in result.evidence
-            ],
+            "related_terms": result.related_terms,
+            "evidence": [self._evidence_row(e) for e in result.evidence],
         }
         return _text(json.dumps(payload, ensure_ascii=False, indent=2))
 

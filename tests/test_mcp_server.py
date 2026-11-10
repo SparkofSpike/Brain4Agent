@@ -111,7 +111,10 @@ class TestTools:
         )
         assert out["result"]["isError"] is False, text_of(out)
         sid = text_of(out).split()[-1]
-        assert server.store.session(sid)[0].tags == ("scope:code",)
+        tags = server.store.session(sid)[0].tags
+        assert "scope:code" in tags
+        assert "kind:raw" in tags
+        assert any(t.startswith("date:") for t in tags)
 
         hit = call(server, "b4a_recall", {"query": "主库", "tags": ["scope:code"]})
         assert json.loads(text_of(hit))["found"] is True
@@ -120,6 +123,19 @@ class TestTools:
         other = call(server, "b4a_recall", {"query": "主库", "tags": ["scope:ops"]})
         assert json.loads(text_of(other))["found"] is False
 
+    def test_remember_adds_project_and_kind_tags(self, server: Server) -> None:
+        """Where and what a memory is, written as tags so retrieval can filter (D-040)."""
+        out = call(
+            server,
+            "b4a_remember",
+            {"content": "主库迁移决策", "project": "brain4agent", "kind": "decision"},
+        )
+        sid = text_of(out).split()[-1]
+        memory = server.store.session(sid)[0]
+        assert "project:brain4agent" in memory.tags
+        assert "kind:decision" in memory.tags
+        assert memory.kind == "decision"
+
     def test_recall_returns_evidence(self, server: Server) -> None:
         call(server, "b4a_remember", {"content": "中文查询搜不到，根因在 keywords.py"})
         out = call(server, "b4a_recall", {"query": "中文查询为什么搜不到"})
@@ -127,6 +143,19 @@ class TestTools:
         assert payload["found"] is True
         assert payload["evidence"]
         assert "keywords.py" in payload["evidence"][0]["text"]
+
+    def test_recall_rows_carry_tags_and_time(self, server: Server) -> None:
+        """A caller should see when and where a memory was written (D-040)."""
+        call(
+            server,
+            "b4a_remember",
+            {"content": "主库是 PostgreSQL", "project": "brain4agent"},
+        )
+        out = call(server, "b4a_recall", {"query": "主库"})
+        row = json.loads(text_of(out))["evidence"][0]
+        assert "project:brain4agent" in row["tags"]
+        assert row["created_at"]
+        assert row["kind"] == "raw"
 
     def test_recall_reports_missing_terms(self, server: Server) -> None:
         """The whole reason this server exists: say which word is absent."""
