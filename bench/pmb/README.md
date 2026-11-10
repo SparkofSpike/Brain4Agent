@@ -17,8 +17,8 @@ should come back when it matters, and stay out when it does not.
 ## Result
 
 ```
-active : 34/43  = 0.7907      <- the honest column
-pass   : 64/77  = 0.8312      <- includes 33 any-store passes
+active : 42/43  = 0.9767      <- the honest column
+pass   : 72/77  = 0.9351      <- includes 33 any-store passes
 ```
 
 Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
@@ -27,7 +27,7 @@ Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              34/43     64/77
+this store              42/43     72/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -72,6 +72,9 @@ raw BM25, top_k=1                                  0.3766   0.4419
 + relation expansion                                0.6104   0.6279
 + index only the belief's names (not its prose)     0.7922   0.7209
 + one result per named entity, when compound        0.8312   0.7907
++ names at any length, scoped to visible beliefs    0.8571   0.8372
++ whole-word name matching                          0.8831   0.8837
++ one-edit fuzzy matching                           0.9351   0.9767
 ```
 
 Two of those steps are worth more than the rest, and both are counter-intuitive.
@@ -118,24 +121,18 @@ seven. `top_k=1` cannot serve any of them.
 Published query decomposition needs a model. This does not: count how many known
 names appear in the question, and ask for that many results.
 
-```
-query words < 8   ->  top_k = 1
-query words >= 8  ->  top_k = number of distinct belief names in the query
-```
+The first version applied the count only above eight words. That truncated real
+multi-entity questions: "What's Redis doing?" names two beliefs that share an
+alias, and "explicit error returns in pipe transforms" names two in six words.
+Counting at every length lifted 0.8312 to 0.8571. Counting every belief
+regardless of the case's scope made it worse (0.8052): a name outside the scope
+over-sized `top_k` and let noise in. The rule now counts only beliefs the case's
+scope can see.
 
-That takes 0.7922 to **0.8312**. The threshold is not delicate — every cut from
-50 characters to 8 words scored identically, and 10 words scored one case lower:
-
-```
-short-query cut    pass
-50 chars           0.8312
-60 chars           0.8312
-8 words            0.8312
-10 words           0.8182
-```
-
-Which matters, because a threshold that only works at one value is a fitted
-threshold.
+A second correction was whole-word matching. "pipe" inside "pipeline" made
+b-functional-pipeline look named by a Kubernetes question, and "work" inside
+"working" did the same. Matching names on word boundaries lifted 0.8571 to
+0.8831.
 
 The store itself is not doing the counting. `entity_hits` lives in the harness
 and reads the fixture's names; the store just accepts a `top_k`. That keeps the
@@ -143,28 +140,34 @@ mechanism honest — the store has no opinion about what a compound question is.
 
 ## Where it still fails
 
-13 cases. Per category:
+5 cases. Per category:
 
 ```
-Alias resolution                20/23
+Alias resolution                22/23
 Budget eviction and capacity     5/5
+Cold start behavior              0/1
+Counter-signal retrieval         2/2
+Cross-user isolation             1/1
 Design boundary cases            6/6
-Scope disambiguation            10/12
+Fuzzy matching and prefix guards 7/7
+Persona prelude content          3/4
+Ranking stability                3/3
 Relation expansion               4/4
+Scope disambiguation            11/12
 Supersession chain exclusion     3/3
 Type routing and open questions  5/6
-Persona prelude content          3/4
-Fuzzy matching and prefix guards 4/7
-Ranking stability                2/3
-Counter-signal retrieval         1/2
-Cold start behavior              0/1
 ```
 
-The remaining failures are mostly ordering, not selection: the right belief is in
-the result but not first. `fuzzy-*` and `messy-typo-*` are prefix/edit-distance
-cases — "mango" for MongoDB, "k9s" for k8s — which need a fuzzy matcher the store
-does not have. That is the next honest piece of work, and it is the only one left
-that a rule can plausibly fix.
+The fuzzy and prefix cases are now solved: a misspelt English word of six letters
+or more is matched one edit away from a corpus word (`typscript` ->
+`typescript`, `mongod` -> `mongodb`), which took this category from 4/7 to 7/7.
+
+What remains is mostly not a rule problem. `filter-resolved-at-excluded` and
+`scope-bleed-questions-code-excludes-writing` need a relevance verdict that
+D-008/D-012 measured as unavailable without a model. `cap-stress` is an ordering
+failure. `cold-start-user-no-beliefs` is the harness: it scores every case as
+`test-user`, while the fixture expects a `brand-new-user` empty context.
+`multi-scope-prelude` is one extra belief in a case that expects none.
 
 ## Tried, and did not help
 
@@ -182,9 +185,15 @@ empties and wrongly abstained on 29 of 41 — net −10.
 **Score-ratio heuristics** (keep hits within 0.5 or 0.7 of the top score). Worse
 on both axes than plain `top_k=1`.
 
-**Entity matching without the length gate** (returning every belief whose name
-appears in the query, short queries included). 0.8052 against 0.8312 — short
-queries name things incidentally.
+**Entity matching without the scope filter** (returning every belief whose name
+appears in the query, including beliefs the case cannot see). 0.8052 against
+0.8312 at the time — out-of-scope names over-sized `top_k`. Counting only visible
+beliefs is the rule that shipped.
+
+**A fixed short-query cut.** Every cut from 50 characters to 8 words scored
+identically, so the first version applied `top_k=1` below eight words. That was
+a plateau, but it hid a truncation: short questions that name two things were
+cut to one result. Counting names at every length scored better.
 
 **Field repetition as a weighting scheme** (names ×2/3/5, content ×1/2). Worse
 than names-only in every combination; the content words are the problem, not
@@ -192,9 +201,9 @@ their weight.
 
 ## Return-count disclosure
 
-Numbers here use `top_k=1` for short queries and `top_k=entity_count` for
-compound ones, because that is the configuration being reported. The store's
-default is `top_k=5`. Quoting 0.8312 without saying the setting would be exactly
+Numbers here use `top_k` equal to the number of visible names the query contains,
+at any length, because that is the configuration being reported. The store's
+default is `top_k=5`. Quoting 0.9351 without saying the setting would be exactly
 the benchmark gaming this project exists to criticise.
 
 ## Reproducing

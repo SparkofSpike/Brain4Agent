@@ -6,6 +6,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `SearchResult.term_frequencies` reports how many sessions each query term
+  appears in. It is the evidence an agent needs when a two-word query returns a
+  pile of same-topic memories: the word is too common, not missing and not
+  misspelt (D-039).
+
 ### Changed
 
 - Chinese retrieval: hit@1 0.9250 → 0.9500, hit@5 0.9750 → 1.0000, MRR

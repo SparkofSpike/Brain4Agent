@@ -230,6 +230,9 @@ the first 3×3 grid is [D-019](docs/decisions.md#d-019-index-wide-query-narrow).
 - **`corpus_missing`** — a content word from the question appears nowhere in the
   stored corpus.
 - **`missing_terms`** (per session) — which question words that session lacked.
+- **`term_frequencies`** — how many sessions each question word appears in. A
+  word present in 453 of 2898 memories is neither missing nor misspelt; it is
+  too common to separate anything, and the query needs another word (D-039).
 
 Whether to refuse is the caller's decision; the store reports the fact.
 
@@ -423,7 +426,7 @@ extraction (D-023), chunking LoCoMo sessions for retrieval, running LongMemEval
 on the store's own tokenisers (D-037), chunking LoCoMo sessions (D-037).
 
 Release history is in [CHANGELOG.md](CHANGELOG.md). The
-[decision log](docs/decisions.md) records 38 entries; the
+[decision log](docs/decisions.md) records 39 entries; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the field.
 

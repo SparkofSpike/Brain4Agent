@@ -2138,3 +2138,64 @@ D-008/D-012 measured as unavailable without a model. `cap-stress` is an ordering
 failure, not a selection one. `cold-start-user-no-beliefs` is the harness: it
 scores every case as `test-user`, while the fixture expects a `brand-new-user`
 empty context. The benchmark's own reference implementation still scores 43/43.
+
+## D-039 Agent queries are keywords, not questions
+
+**Date:** 2026-11-10
+**Status:** Measured; one evidence field shipped, ranking unchanged
+
+**Context.** D-037 optimised for the Chinese benchmark's questions
+("中文查询为什么搜不到记忆？"). A user pointed out that an agent recalling a fact
+does not ask a question — it types two or three keywords, often with an
+identifier: "gh-oauth 403 上游 PR". If that is the real query distribution, the
+benchmark may be measuring the wrong thing.
+
+**Experiment.** Agent-style queries built from the real 2898-memory store: take a
+memory's first distinctive nouns and identifiers, ask with two, three, or four of
+them, and check whether the memory comes back. 300 queries, 100 per length.
+
+```
+queries        old code        new code (D-037/D-038)
+2 words        hit@1 0.270     hit@1 0.270
+3 words        hit@1 0.530     hit@1 0.530
+4 words        hit@1 0.610     hit@1 0.610
+```
+
+**Finding 1: the D-037/D-038 changes do nothing for keyword queries.** No
+interrogatives to drop, one memory per session so folding is a no-op, and the
+keywords come from the corpus so nothing is misspelt. The improvements are real
+for the benchmarks they were measured on; they are not improvements for an agent
+typing keywords. Both facts can be true at once, and the README should not imply
+otherwise.
+
+**Finding 2: two-word queries fail on information, not ranking.** Gold position
+for the 100 two-word queries: rank 1: 27, 2-5: 29, 6-10: 7, 11-50: 16, 51-200: 17,
+missing: 4. Over a third of the gold memories sit outside the top ten. Coverage
+re-ranking (`score * (1 + a * coverage)`) and MMR-style diversity were both
+measured: three- and four-word hit@1 moved 0.53 -> 0.55 and 0.61 -> 0.63,
+two-word hit@1 did not move at all. Neither is shipped.
+
+**Finding 3: the failures are ambiguous queries, not retrieval bugs.** "GEO AI"
+returns one GEO memory instead of another; "Reverse Web" returns the server
+runbook instead of the character-art note. Both are correct matches to a query
+that named a project and nothing else. The right response is a wider result set,
+which the store already provides.
+
+**What shipped.** `SearchResult.term_frequencies`: how many sessions each query
+term appears in. Measured on the same store:
+
+```
+GEO AI                     geo=453  ai=250
+gh-oauth 403 上游 PR       oauth=2  403=6  gh=90  pr=557
+SpikeBot 005 Codespaces    codespaces=4  spikebot=137  005=14
+```
+
+The first query cannot be ranked better; it needs a third word. The second is
+already precise. The evidence says which, without a model and without a verdict.
+This is D-011 applied to the query itself: report the fact, let the caller decide
+whether to rephrase.
+
+**What remains.** The real store's `tags` are broken by the nmem import — all
+2898 rows carry a literal `nmem-tag:["build" ...]` string instead of structured
+labels, so scope filtering cannot help. Repairing that is a data migration, not a
+retrieval change, and it needs the owner's approval.
