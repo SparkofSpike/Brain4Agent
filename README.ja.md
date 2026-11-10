@@ -416,10 +416,9 @@ python -m bench.locomo.run
 
 ## 謝辞
 
-[nhadaututtheky](https://github.com/nhadaututtheky) の
+@nhadaututtheky の
 [neural-memory](https://github.com/nhadaututtheky/neural-memory) に感謝する。
-本プロジェクトはそこのバグ修正
-（[PR #228](https://github.com/nhadaututtheky/neural-memory/pull/228)）から
+本プロジェクトはそこのバグ修正から
 始まった: 中国語のクエリが、キーワード正規表現に漢字の範囲がないために
 何も返さなかった。その brain は `bench/nmem/` のコーパスでもある。
 

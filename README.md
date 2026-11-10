@@ -421,11 +421,10 @@ API key and no network. Changes to a design decision belong in
 
 ## Special thanks
 
-To [nhadaututtheky](https://github.com/nhadaututtheky) for
+To @nhadaututtheky for
 [neural-memory](https://github.com/nhadaututtheky/neural-memory). This project
-began as a bug fix there ([PR #228](https://github.com/nhadaututtheky/neural-memory/pull/228)):
-a Chinese query returned nothing because the keyword regex had no Han range. Its
-brain is also the corpus for `bench/nmem/`.
+began as a bug fix there: a Chinese query returned nothing because the keyword
+regex had no Han range. Its brain is also the corpus for `bench/nmem/`.
 
 ## License
 
