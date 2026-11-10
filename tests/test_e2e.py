@@ -27,7 +27,7 @@ def test_reports_the_recorded_baseline(capsys) -> None:
     """D-019's adopted numbers, so a regression shows up as a diff."""
     main([])
     out = capsys.readouterr().out
-    assert "0.9250" in out  # current hit@1
+    assert "0.9500" in out  # current hit@1
     assert f"{BASELINE['hit@1']:.4f}" in out  # the pre-D-019 baseline
 
 

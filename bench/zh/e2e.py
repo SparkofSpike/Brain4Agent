@@ -8,10 +8,11 @@ the benchmark has stopped describing the product.
     python -m bench.zh.e2e
 
 BASELINE is D-010, the symmetric bigram/bigram implementation. The store now
-indexes with bigrams *and* words and queries with words (D-019), so it should sit
-above the baseline, not level with it.
+indexes with bigrams *and* words (D-019), drops question words from the query
+side, and folds a session's best three turns into one score (D-037), so it should
+sit above the baseline, not level with it.
     baseline  hit@1 0.825  hit@5 0.950  hit@10 1.000  MRR 0.8911
-    expected  hit@1 0.925  hit@5 0.975  hit@10 1.000  MRR 0.9404
+    expected  hit@1 0.950  hit@5 1.000  hit@10 1.000  MRR 0.9613
 """
 
 from __future__ import annotations

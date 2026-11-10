@@ -11,6 +11,7 @@ import pytest
 
 from bench.loader import MemoryItem, Query, Task, _flatten_sessions
 from bench.metrics import RetrievalScore, aggregate, score_one
+from bench.pmb.run import entity_hits
 from bench.pmb.run import main as pmb_main
 from bench.retrieval import BM25, tokenize
 from bench.runner import collapse_to_sessions
@@ -259,6 +260,18 @@ class TestFlattenSessions:
             Task(query=q, memories=[])
 
 
+class TestPmbSelection:
+    def test_entity_hits_requires_whole_word(self) -> None:
+        """pipe inside pipeline is not a name match (D-038)."""
+        names = {"b1": {"pipe"}}
+        assert entity_hits("explicit error returns in pipe transforms", names) == 1
+        assert entity_hits("kubernetes pipeline nodes", names) == 0
+
+    def test_entity_hits_counts_each_visible_belief_once(self) -> None:
+        names = {"b1": {"redis"}, "b2": {"redis"}}
+        assert entity_hits("what's redis doing?", names) == 2
+
+
 class TestPmbGate:
     """The README names PrecisionMemBench as part of the verification gate.
 
@@ -277,4 +290,4 @@ class TestPmbGate:
         assert pmb_main(["--min-active", "0.99"]) == 1
 
     def test_recorded_thresholds_pass(self) -> None:
-        assert pmb_main(["--min-pass", "0.82", "--min-active", "0.78"]) == 0
+        assert pmb_main(["--min-pass", "0.90", "--min-active", "0.95"]) == 0

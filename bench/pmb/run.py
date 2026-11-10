@@ -34,6 +34,7 @@ time. Nothing is inferred from the query, and no model is involved.
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 import tempfile
 from collections import Counter
@@ -48,9 +49,11 @@ ANSWER_KINDS = ("preference", "entity", "decision", "relation")
 
 # A query this short is naming one thing and asking about it. Anything longer is
 # usually compound, and a compound question needs one result per entity it names.
-# Every threshold from 50 characters to 8 words scored identically -- see the
-# README; it is a plateau, not a fitted point.
-COMPOUND_WORDS = 8
+#
+# The length cut is gone: it forced top_k=1 below eight words, which truncated
+# "What's Redis doing?" (one alias shared by two beliefs) and "explicit error
+# returns in pipe transforms" (two named beliefs, six words). Counting names at
+# every length is the same rule without the arbitrary half.
 
 
 def name_set(belief: dict) -> set[str]:
@@ -67,9 +70,21 @@ def entity_hits(query: str, names: dict[str, set[str]]) -> int:
     (arXiv:2507.00355 and relatives). This one does not understand the question;
     it counts how many known names appear in it, which is enough to size the
     result set without knowing what the question means.
+
+    Whole-word matching, not substring. "pipe" inside "pipeline" counted
+    b-functional-pipeline as named by "kube schedule pods across our CI pipeline",
+    which over-sized top_k and pushed an unrelated belief into the result.
+    "work" inside "working" had the same shape.
     """
     ql = query.lower()
-    return sum(1 for ns in names.values() if any(n in ql for n in ns))
+    hits = 0
+    for ns in names.values():
+        for n in ns:
+            pattern = rf"(?<![a-z0-9]){re.escape(n)}(?![a-z0-9])"
+            if re.search(pattern, ql):
+                hits += 1
+                break
+    return hits
 
 
 def scope_tags(belief: dict) -> tuple[str, ...]:
@@ -126,7 +141,6 @@ def main(argv: list[str] | None = None) -> int:
     args = ap.parse_args(argv)
 
     beliefs, cases = load()
-    name_sets = {b["_id"]: name_set(b) for b in beliefs}
     print(f"corpus: {len(beliefs)} beliefs · cases: {len(cases)}")
 
     with tempfile.TemporaryDirectory() as td, MemoryStore(Path(td) / "pmb.db") as store:
@@ -161,13 +175,23 @@ def main(argv: list[str] | None = None) -> int:
             if cap <= 0 or not case["query"].strip():
                 retrieved: list[str] = []
             else:
-                compound = len(case["query"].split()) >= COMPOUND_WORDS
-                wanted = entity_hits(case["query"], name_sets) if compound else 1
+                scope = list(case.get("scope") or [])
+                # Count only beliefs this case's scope can see. Counting the whole
+                # corpus over-sized top_k and let noise in: "What's Redis doing?"
+                # names two beliefs that both alias Redis (wanted 2), while a
+                # scope-disambiguation case names one visible belief (wanted 1).
+                visible = {
+                    b["_id"]: name_set(b)
+                    for b in beliefs
+                    if not b.get("superseded_by")
+                    and any(s in scope for s in (b.get("scope") or []))
+                }
+                wanted = entity_hits(case["query"], visible)
                 top_k = max(1, min(wanted, cap))
                 result = store.search(
                     case["query"],
                     top_k=top_k,
-                    tags=[f"scope:{s}" for s in (case.get("scope") or [])],
+                    tags=[f"scope:{s}" for s in scope],
                     kinds=ANSWER_KINDS,
                     expand_refs=True,
                 )

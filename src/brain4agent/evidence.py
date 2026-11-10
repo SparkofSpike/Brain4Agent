@@ -23,27 +23,16 @@ import math
 from dataclasses import dataclass, field
 from typing import Protocol
 
+from brain4agent.tokenize import INTERROGATIVES as _INTERROGATIVE
 from brain4agent.tokenize import load_jieba, word_tokens
 
 # Question terms that are structural rather than about the answer. Reporting
 # "什么" as missing would be true of every question and useless.
-_INTERROGATIVE = frozenset(
-    {
-        "什么",
-        "怎么",
-        "怎样",
-        "哪个",
-        "哪些",
-        "哪里",
-        "多少",
-        "几次",
-        "多久",
-        "为什么",
-        "是否",
-        "有没有",
-        "如何",
-    }
-)
+#
+# The set now lives in tokenize.py because the query-side tokeniser uses the
+# same definition to drop interrogatives from matching (D-037). One list, two
+# jobs: if they ever diverge, a word can be excluded from the report while still
+# steering the ranking.
 
 _FILLER = frozenset("的了是在和与就都而及或吧呢吗啊呀哦嗯我你他她它这那一个们")
 

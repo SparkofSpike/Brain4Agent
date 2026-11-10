@@ -14,7 +14,7 @@ import pytest
 
 from brain4agent import BM25, MemoryStore, describe, tokenize, word_tokens
 from brain4agent.evidence import question_terms
-from brain4agent.tokenize import both_tokens, jieba_tokens
+from brain4agent.tokenize import both_tokens, jieba_tokens, load_jieba, query_tokens
 
 
 @pytest.fixture()
@@ -315,6 +315,20 @@ class TestTokenize:
         toks = word_tokens("杭州测试机上装的是什么数据库")
         assert any("数据库" in t for t in toks)
 
+    def test_query_tokens_drops_interrogatives(self) -> None:
+        """哪个 asks the question; it must not steer the ranking (D-037)."""
+        if load_jieba() is None:
+            pytest.skip("query_tokens needs jieba; without it the query side falls back to bigrams")
+        toks = query_tokens("第一版修复和上限调整哪个先做？")
+        assert "哪个" not in toks
+        assert "第一版" in toks
+        assert "先" in toks, "single-character words are not filtered (D-019)"
+
+    def test_query_tokens_keeps_the_answer_words(self) -> None:
+        if load_jieba() is None:
+            pytest.skip("query_tokens needs jieba")
+        assert query_tokens("拒答难在哪里？") == ["拒答", "难", "在", "？"]
+
 
 class TestBM25:
     def test_ranks_most_relevant_first(self) -> None:
@@ -359,6 +373,37 @@ class TestBM25:
         idx.index([("zzz", "相同 相同"), ("aaa", "相同 相同")])
         first = [i for i, _ in idx.search("相同")]
         assert first == ["zzz", "aaa"], "insertion order must win, not id order"
+
+    def test_fuzzy_matches_one_edit_typo(self) -> None:
+        """An unknown English word still matches the corpus word it misspells (D-038)."""
+        idx = BM25(index_fn=tokenize, query_fn=tokenize, fuzzy=True)
+        idx.index([("a", "we write typescript here"), ("b", "python only")])
+        assert idx.search("typscript")[0][0] == "a"
+
+    def test_fuzzy_is_off_by_default(self) -> None:
+        idx = BM25()
+        idx.index([("a", "we write typescript here")])
+        assert idx.search("typscript") == []
+
+
+class TestSessionFold:
+    def test_best_turn_plus_next_two(self, store: MemoryStore) -> None:
+        """A session scores from its best three turns, not its best one (D-037)."""
+        sid = store.new_session()
+        first = store.add("第一轮", session_id=sid)
+        second = store.add("第二轮", session_id=sid)
+        third = store.add("第三轮", session_id=sid)
+        fourth = store.add("第四轮", session_id=sid)
+        store._ensure_fresh()
+        folded = store._fold_sessions([(first, 8.0), (second, 4.0), (third, 2.0), (fourth, 1.0)])
+        assert folded == [(first, 8.0 + 0.5 * (4.0 + 2.0))]
+
+    def test_single_turn_sessions_keep_their_scores(self, store: MemoryStore) -> None:
+        a = store.add("甲", session_id="a")
+        b = store.add("乙", session_id="b")
+        store._ensure_fresh()
+        folded = store._fold_sessions([(a, 5.0), (b, 3.0)])
+        assert folded == [(a, 5.0), (b, 3.0)]
 
 
 class TestDescribe:

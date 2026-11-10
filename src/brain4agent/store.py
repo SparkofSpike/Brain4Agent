@@ -35,22 +35,24 @@ from brain4agent.evidence import Evidence, JudgedResult, SearchResult, build_evi
 from brain4agent.extract import Extractor
 from brain4agent.simhash import DEFAULT_THRESHOLD, near_duplicate
 from brain4agent.simhash import fingerprint as simhash_of
-from brain4agent.tokenize import BM25, both_tokens, jieba_tokens, load_jieba, tokenize
+from brain4agent.tokenize import BM25, both_tokens, load_jieba, query_tokens, tokenize
 
 
 def _tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], list[str]]]:
     """Index-side and query-side tokenisers, chosen by what is installed.
 
-    With jieba: index with bigrams *and* words, query with words. Measured at
-    hit@1 0.925 / MRR 0.940 against 0.825 / 0.891 for bigrams on both sides
-    (bench/zh/indexing_probe.py).
+    With jieba: index with bigrams *and* words, query with words minus
+    interrogatives. Measured at hit@1 0.925 / MRR 0.940 for the tokeniser split
+    (bench/zh/indexing_probe.py), and 0.950 / 0.960 once 哪个/为什么/哪里 stop
+    steering the ranking (bench/zh/tuning_probe.py).
 
     Without jieba: bigrams on both sides. Worse, but working -- which is the
-    whole reason jieba is an extra and not a dependency.
+    whole reason jieba is an extra and not a dependency. Session folding still
+    applies there, so the fallback measures 0.875 hit@1, not 0.825.
     """
     if load_jieba() is None:
         return tokenize, tokenize
-    return both_tokens, jieba_tokens
+    return both_tokens, query_tokens
 
 
 @lru_cache(maxsize=1)
@@ -62,6 +64,14 @@ def _cached_tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], li
 # wrong (a whole file pasted in, a log dump) and a loud error beats a memory that
 # silently costs seconds per write.
 MAX_CONTENT_CHARS = 100_000
+
+# How much the second and third best turns of a session add to its score. The
+# best turn leads; the next two carry the evidence that the question's words
+# co-occur in one conversation rather than one lucky turn. Swept 0.0-1.5 on the
+# Chinese benchmark: 0.5 gave hit@1 0.9500 / MRR 0.9600 against 0.9250 / 0.9404
+# for max-only, and the curve is flat from 0.1 to 1.5 -- this is a plateau, not
+# a fitted point (bench/zh/tuning_probe.py).
+SESSION_FOLD_BETA = 0.5
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -300,7 +310,7 @@ class MemoryStore:
         for sid, turns in self._by_session.items():
             self._session_text[sid] = "\n".join(m.content.lower() for m in turns)
 
-        self._index = BM25(k1=self._k1, b=self._b, index_fn=index_fn, query_fn=query_fn)
+        self._index = BM25(k1=self._k1, b=self._b, index_fn=index_fn, query_fn=query_fn, fuzzy=True)
         self._index.index_tokens(prepared)
         self._data_version = self._db.execute("PRAGMA data_version").fetchone()[0]
         self._dirty = False
@@ -831,7 +841,12 @@ class MemoryStore:
                 seen.add(target)
                 hits.append((target, score))
         else:
-            hits = self._index.search(query, top_k=top_k * 3)
+            # Fold needs to see a session's other turns, so the candidate window
+            # is wider than top_k: at top_k*3 a session's matching turns could
+            # fall outside the window and the fold would never see them.
+            hits = self._index.search(query, top_k=top_k * 10)
+
+        hits = self._fold_sessions(hits)
 
         if expand_refs and hits:
             # Truncate to the requested number *first*, then expand: a relation's
@@ -891,6 +906,38 @@ class MemoryStore:
             if near_duplicate(mem.fingerprint, other.fingerprint, threshold):
                 out.append(other.id)
         return out
+
+    def _fold_sessions(self, hits: list[tuple[str, float]]) -> list[tuple[str, float]]:
+        """Score a session from its best turn plus its next two.
+
+        Max-only was the first implementation, and it undercounts a session whose
+        question words landed in different turns. The Chinese temporal question
+        is the worked example: 第一版 matched one turn and 上限 another, so no
+        single turn outscored an unrelated session that happened to contain a
+        question word. Folding moved that question from rank 4 to 1 and the
+        benchmark from MRR 0.9404 to 0.9600.
+
+        The best turn still dominates, so a weak turn can never lift a session on
+        its own. Ties keep insertion order -- the same rule the index uses, and
+        for the same reason: the same query must return the same answer run to
+        run.
+        """
+        if not hits:
+            return hits
+        per_session: dict[str, list[float]] = {}
+        representative: dict[str, str] = {}
+        for memory_id, score in hits:
+            sid = self._id_to_session.get(memory_id)
+            if sid is None:
+                continue
+            per_session.setdefault(sid, []).append(score)
+            representative.setdefault(sid, memory_id)
+        folded: list[tuple[str, float]] = []
+        for sid, scores in per_session.items():
+            scores.sort(reverse=True)
+            folded.append((representative[sid], scores[0] + SESSION_FOLD_BETA * sum(scores[1:3])))
+        folded.sort(key=lambda kv: -kv[1])
+        return folded
 
     def _blend_weights(
         self, hits: list[tuple[str, float]], weight_blend: float

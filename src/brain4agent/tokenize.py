@@ -62,6 +62,33 @@ _WORD = re.compile(r"[a-z0-9_]+")
 # cutting at these destroys the word instead of separating filler from it.
 _CJK_STOP = frozenset("的了是在和与就都而及或吧呢吗啊呀哦嗯我你他她它这那一个们")
 
+# Interrogatives. A question asks with them; an answer rarely answers with them.
+# They occur in many questions and in the corpus by coincidence, so they match a
+# lot of documents without separating any of them. Measured on the Chinese
+# benchmark with everything else held constant: removing them from the query
+# side moved hit@1 0.9250 -> 0.9500, hit@5 0.9750 -> 1.0000 and MRR
+# 0.9404 -> 0.9600 (bench/zh/tuning_probe.py).
+#
+# This is narrower than dropping every single-character word, which measured
+# worse (hit@1 0.9000, D-019): 和/先/做 carry signal on this corpus, 哪个 does not.
+INTERROGATIVES = frozenset(
+    {
+        "什么",
+        "怎么",
+        "怎样",
+        "哪个",
+        "哪些",
+        "哪里",
+        "多少",
+        "几次",
+        "多久",
+        "为什么",
+        "是否",
+        "有没有",
+        "如何",
+    }
+)
+
 _CJK_RUN = re.compile(f"[{_CJK_CLASS}]+|[^{_CJK_CLASS}]+")
 
 
@@ -274,6 +301,16 @@ def jieba_tokens(text: str) -> list[str]:
     return [w.strip().lower() for w in jieba.lcut(text) if w.strip()]
 
 
+def query_tokens(text: str) -> list[str]:
+    """The query-side tokeniser: dictionary words minus interrogatives.
+
+    The read side is where noise costs ranking; the write side is where dropping
+    a clue costs recall. Question words are pure query-side noise: 哪个 matches
+    S29's "什么时候用哪个" and every other question, and separates none of them.
+    """
+    return [t for t in jieba_tokens(text) if t not in INTERROGATIVES]
+
+
 # jieba degrades super-linearly on one long unpunctuated run. Measured: 10k
 # identical characters 585 ms, 20k 2.4 s, 100k 85 s, while 50k characters of
 # natural text takes 600 ms.
@@ -314,6 +351,36 @@ def both_tokens(text: str) -> list[str]:
     return out
 
 
+def _within_one_edit(a: str, b: str) -> bool:
+    """True when a and b differ by at most one edit.
+
+    One substitution, one insertion/deletion, or one adjacent transposition --
+    the shapes a typed word actually takes. ``typsecript`` is a transposition of
+    ``typescript``; ``typscript`` has one missing letter; ``mongod`` is one
+    letter short of ``mongodb``.
+    """
+    if a == b:
+        return True
+    la, lb = len(a), len(b)
+    if abs(la - lb) > 1:
+        return False
+    if la == lb:
+        diffs = [i for i in range(la) if a[i] != b[i]]
+        if len(diffs) == 1:
+            return True
+        return (
+            len(diffs) == 2
+            and diffs[1] == diffs[0] + 1
+            and a[diffs[0]] == b[diffs[1]]
+            and a[diffs[1]] == b[diffs[0]]
+        )
+    short, long = (a, b) if la < lb else (b, a)
+    i = 0
+    while i < len(short) and short[i] == long[i]:
+        i += 1
+    return short[i:] == long[i + 1 :]
+
+
 class BM25:
     """Okapi BM25 over a fixed corpus.
 
@@ -323,6 +390,12 @@ class BM25:
     ``index_fn`` and ``query_fn`` are separate because they are genuinely
     different jobs. Written memories want every clue kept; a question wants its
     noise dropped. Sharing one tokeniser forces a choice that loses on one side.
+
+    ``fuzzy`` adds one optional matching path: an English word the corpus has
+    never contained is also matched against a corpus word one edit away (typo,
+    transposition, a missing or extra letter). It is off by default because it
+    trades exactness for recall and every published benchmark number was measured
+    without it.
     """
 
     def __init__(
@@ -331,11 +404,13 @@ class BM25:
         b: float = 0.75,
         index_fn: Callable[[str], list[str]] | None = None,
         query_fn: Callable[[str], list[str]] | None = None,
+        fuzzy: bool = False,
     ) -> None:
         self.k1 = k1
         self.b = b
         self.index_fn = index_fn or tokenize
         self.query_fn = query_fn or tokenize
+        self.fuzzy = fuzzy
         self._ids: list[str] = []
         self._docs: list[Counter[str]] = []
         self._lens: list[int] = []
@@ -392,11 +467,50 @@ class BM25:
         self._idf = {
             term: math.log(1.0 + (self._n - df + 0.5) / (df + 0.5)) for term, df in self._df.items()
         }
+        # Candidates for the fuzzy path. Built once per index, ASCII letters only,
+        # so a Chinese query never pays for it.
+        self._fuzzy_vocab: dict[str, int] = {}
+        if self.fuzzy:
+            self._fuzzy_vocab = {
+                term: df
+                for term, df in self._df.items()
+                if len(term) >= 5 and term.isascii() and term.isalpha()
+            }
+
+    def _expand(self, terms: list[str]) -> list[str]:
+        """Add the corpus word an unknown English query word was probably meant to be.
+
+        Only words the corpus has never contained are expanded, only ASCII words,
+        and only from six letters up. Those three guards matter: ``test`` ->
+        ``tests`` is a legitimate edit but not a misspelling, and expanding every
+        short word would rewrite half of an English query.
+
+        The closest word by document frequency wins, so between two candidates
+        the more common one is chosen.
+        """
+        if not self._fuzzy_vocab:
+            return terms
+        out = list(terms)
+        for term in set(terms):
+            if term in self._df or len(term) < 6 or not term.isascii() or not term.isalpha():
+                continue
+            best: str | None = None
+            best_df = -1
+            for candidate, df in self._fuzzy_vocab.items():
+                if abs(len(candidate) - len(term)) > 1:
+                    continue
+                if _within_one_edit(term, candidate) and df > best_df:
+                    best, best_df = candidate, df
+            if best is not None:
+                out.append(best)
+        return out
 
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         if not self._n:
             return []
         q_terms = self.query_fn(query)
+        if self.fuzzy:
+            q_terms = self._expand(q_terms)
         if not q_terms:
             return []
 
