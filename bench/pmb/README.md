@@ -18,7 +18,7 @@ should come back when it matters, and stay out when it does not.
 
 ```
 active : 42/43  = 0.9767      <- the honest column
-pass   : 72/77  = 0.9351      <- includes 33 any-store passes
+pass   : 74/77  = 0.9610      <- includes 33 any-store passes
 ```
 
 Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
@@ -27,7 +27,7 @@ Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              42/43     72/77
+this store              42/43     74/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -75,6 +75,7 @@ raw BM25, top_k=1                                  0.3766   0.4419
 + names at any length, scoped to visible beliefs    0.8571   0.8372
 + whole-word name matching                          0.8831   0.8837
 + one-edit fuzzy matching                           0.9351   0.9767
++ English stopwords + inflection folding (D-041)   0.9610   0.9767
 ```
 
 Two of those steps are worth more than the rest, and both are counter-intuitive.
@@ -140,7 +141,7 @@ mechanism honest — the store has no opinion about what a compound question is.
 
 ## Where it still fails
 
-5 cases. Per category:
+3 cases. Per category:
 
 ```
 Alias resolution                22/23
@@ -150,10 +151,10 @@ Counter-signal retrieval         2/2
 Cross-user isolation             1/1
 Design boundary cases            6/6
 Fuzzy matching and prefix guards 7/7
-Persona prelude content          3/4
+Persona prelude content          4/4
 Ranking stability                3/3
 Relation expansion               4/4
-Scope disambiguation            11/12
+Scope disambiguation            12/12
 Supersession chain exclusion     3/3
 Type routing and open questions  5/6
 ```
@@ -161,13 +162,16 @@ Type routing and open questions  5/6
 The fuzzy and prefix cases are now solved: a misspelt English word of six letters
 or more is matched one edit away from a corpus word (`typscript` ->
 `typescript`, `mongod` -> `mongodb`), which took this category from 4/7 to 7/7.
+`Persona prelude content` and `Scope disambiguation` then went to full marks in
+D-041: a query's grammar (`what`, `the`, `in`) was matching beliefs whose prose
+contains those words, and dropping it from the query side is what stopped the
+scope-bleed belief from surfacing.
 
-What remains is mostly not a rule problem. `filter-resolved-at-excluded` and
-`scope-bleed-questions-code-excludes-writing` need a relevance verdict that
-D-008/D-012 measured as unavailable without a model. `cap-stress` is an ordering
-failure. `cold-start-user-no-beliefs` is the harness: it scores every case as
-`test-user`, while the fixture expects a `brand-new-user` empty context.
-`multi-scope-prelude` is one extra belief in a case that expects none.
+What remains is mostly not a rule problem. `filter-resolved-at-excluded` needs a
+relevance verdict that D-008/D-012 measured as unavailable without a model.
+`cap-stress` is an ordering failure. `cold-start-user-no-beliefs` is the
+harness: it scores every case as `test-user`, while the fixture expects a
+`brand-new-user` empty context.
 
 ## Tried, and did not help
 
@@ -203,7 +207,7 @@ their weight.
 
 Numbers here use `top_k` equal to the number of visible names the query contains,
 at any length, because that is the configuration being reported. The store's
-default is `top_k=5`. Quoting 0.9351 without saying the setting would be exactly
+default is `top_k=5`. Quoting 0.9610 without saying the setting would be exactly
 the benchmark gaming this project exists to criticise.
 
 ## Reproducing

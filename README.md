@@ -206,6 +206,10 @@ in-memory index is a counting exercise.
 Writes commit in batches. A 1,016-turn import takes 3.8 s one commit at a time
 and 0.25 s inside `batch()`.
 
+Rebuild also builds the phrase pair index when English summaries are in play
+(D-041), which roughly doubles that column: 8.9 ms for the 127-turn corpus and
+60 ms for 1,016 turns on the machine this was last measured on.
+
 ### Read/write tokenizer split
 
 Indexing and querying use different tokenizers. Measured over a 3×3 grid of
@@ -224,6 +228,14 @@ removed from the query side, and a session's best three turns are folded into
 one score. Both are measured in
 [D-037](docs/decisions.md#d-037-query-side-question-words-and-session-folding);
 the first 3×3 grid is [D-019](docs/decisions.md#d-019-index-wide-query-narrow).
+
+English gets the same treatment one language over (D-041): query-side stopwords
+(`when`, `the`, `for`), inflection folding on both sides (`camped` matches
+`camping`), and a small bonus when two adjacent query words appear adjacent in a
+memory (`pottery class` outranks the same two words scattered). The stemmer
+runs at index time, not in the stored token column, so an existing database
+needs no migration. Chinese is untouched by all three — its bigrams already
+index adjacency, and the rules refuse non-ASCII terms.
 
 ### Evidence, not verdicts
 
@@ -268,8 +280,8 @@ Across three benchmarks:
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
 | PrecisionMemBench | active | **42/43** | 18/43 (open-knowledge-format) |
-| PrecisionMemBench | total | **72/77** | 36/77 (open-knowledge-format) |
-| LoCoMo | hit@1 | **0.6310** | not comparable |
+| PrecisionMemBench | total | **74/77** | 36/77 (open-knowledge-format) |
+| LoCoMo | hit@1 | **0.6826** | not comparable |
 
 ### PrecisionMemBench — retrieval precision
 
@@ -279,7 +291,7 @@ column, because 33 of the 77 cases pass with an empty store.
 
 ```
 active  42/43 = 0.9767     cases that need query-dependent retrieval
- total  72/77 = 0.9351     including cases any store passes
+ total  74/77 = 0.9610     including cases any store passes
 ```
 
 Three changes lifted this from 34/43 and 64/77. The result set is now sized from
@@ -290,6 +302,10 @@ out-of-scope beliefs. Whole-word name matching replaced substring matching, so
 misspelt English word against a corpus word one edit away (`typscript` →
 `typescript`, `mongod` → `mongodb`). See
 [D-038](docs/decisions.md#d-038-sizing-the-result-set-and-matching-one-edit-away).
+Two more cases came with the English query folding in
+[D-041](docs/decisions.md#d-041-english-query-folding-stopwords-stems-and-adjacency):
+a query's grammar is not a memory, so dropping `what` and `the` from the query
+side keeps a scope-bleed belief out of the result set.
 
 Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 
@@ -297,7 +313,7 @@ Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              42/43     72/77
+this store              42/43     74/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -319,10 +335,10 @@ implementation scores 43/43 and 77/77.
 1540 questions over 272 sessions, 5882 turns.
 
 ```
-hit@1   0.6310
-hit@5   0.8870
-hit@10  0.9484
-MRR     0.7402
+hit@1   0.6826
+hit@5   0.9020
+hit@10  0.9549
+MRR     0.7784
 ```
 
 `python -m bench.locomo.run` — no model, data committed. These are session
@@ -330,7 +346,7 @@ retrieval rates, not answer accuracy under an LLM judge, so they are not
 comparable to published LoCoMo numbers.
 
 Indexing turns instead of sessions costs 2.5 points of hit@1 (0.6022 → 0.6310),
-same tokenisers and scoring.
+same tokenisers and scoring — measured before D-041 raised both.
 
 ### Chinese benchmark
 
@@ -418,7 +434,10 @@ Library, CLI and MCP server are complete.
 merge, and is not on the search path) and weight (`reinforce`, `decay`,
 `prune_by_weight`). Retrieval drops question words from the query side, folds a
 session's best three turns into one score, and matches an unknown English word
-one edit away from a corpus word (D-037, D-038).
+one edit away from a corpus word (D-037, D-038). English queries also drop
+stopwords, fold inflections, and reward word adjacency (D-041) — LoCoMo hit@1
+0.6310 → 0.6826 and PrecisionMemBench total 72/77 → 74/77, with the Chinese
+number unchanged.
 
 **Not built:** cross-session synthesis, multimodal, schema on `kind`,
 multi-retriever fusion, a recall scheduler, time-decayed forgetting.
@@ -443,8 +462,8 @@ python -m bench.pmb.run
 python -m bench.locomo.run
 ```
 
-`bench/zh/e2e.py` should report `hit@1 0.9500`; `bench.pmb.run` `pass 72/77`;
-`bench.locomo.run` `hit@1 0.6310`. Lower is a regression. The last two need no
+`bench/zh/e2e.py` should report `hit@1 0.9500`; `bench.pmb.run` `pass 74/77`;
+`bench.locomo.run` `hit@1 0.6826`. Lower is a regression. The last two need no
 API key and no network. Changes to a design decision belong in
 `docs/decisions.md` as a new entry, with the measurement that justifies it.
 

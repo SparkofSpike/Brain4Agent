@@ -8,35 +8,35 @@ model in the loop, and the number published whatever it says.
 ```
 answerable: 1531 of 1540 questions
 
-hit@1   0.6270
-hit@5   0.8850
-hit@10  0.9471
-mrr     0.7369
+hit@1   0.6826
+hit@5   0.9020
+hit@10  0.9549
+mrr     0.7784
 ```
 
 By category (hit@1):
 
 ```
-open-domain   0.7111
-temporal      0.6156
-single-hop    0.4591
-multi-hop     0.4045
+open-domain   0.7586
+temporal      0.6656
+single-hop    0.5552
+multi-hop     0.4270
 ```
 
 **These are retrieval numbers, not answer accuracy.** Published LoCoMo scores
 (0.67–0.92) measure whether a generated answer matches the gold answer under an
-LLM judge. A retrieval number can only bound that: with `hit@5 = 0.8850`, the
+LLM judge. A retrieval number can only bound that: with `hit@5 = 0.9020`, the
 best possible answer accuracy **for a reader that sees exactly five sessions and
-cannot reason across them** is 88.5%.
+cannot reason across them** is 90.2%.
 
 That condition matters and this file originally omitted it. Allow ten sessions
-and the bound is this store's own `hit@10 = 0.9471`; allow a reader to reason
+and the bound is this store's own `hit@10 = 0.9549`; allow a reader to reason
 between sessions — which AMB's own prompt instructs it to do — and there is no
 single-retrieval bound at all. It is a statement about one configuration, not
 about the field, and it is not evidence that any other system's retrieval is
 worse.
 
-Anyone comparing 0.6270 against Mem0's 0.669 or Letta's 0.740 is comparing two
+Anyone comparing 0.6826 against Mem0's 0.669 or Letta's 0.740 is comparing two
 different measurements. The README says so here so that nobody has to discover it
 later.
 
@@ -66,6 +66,9 @@ turn-level      hit@1 0.5447   hit@5 0.8210   hit@10 0.9099   mrr 0.6595
 session-level   hit@1 0.6270   hit@5 0.8850   hit@10 0.9471   mrr 0.7369
 ```
 
+(Both rows predate D-041; the current session-level column is the Result block
+above.)
+
 +8.2 points of hit@1, from changing which text goes into the index and nothing
 else. An answer spread across four short turns produces four mediocre matches;
 the same text as one document produces one strong one.
@@ -77,10 +80,29 @@ the name sitting next to what they said.
 ## What did not matter
 
 **BM25 parameters.** k1 in {1.2, 1.5, 2.0} × b in {0.2, 0.4, 0.6, 0.75, 0.9}
-spans 0.6166 to 0.6316. The default (1.5 / 0.75) is within noise of the best.
-Reported because a flat grid is a result: this corpus is not sensitive to length
-normalisation, unlike PrecisionMemBench where `b` had literally no effect because
-every document was the same size.
+spans 0.6166 to 0.6316 before D-041. The default (1.5 / 0.75) is within noise of
+the best. Reported because a flat grid is a result: this corpus is not sensitive
+to length normalisation, unlike PrecisionMemBench where `b` had literally no
+effect because every document was the same size.
+
+**Coverage re-ranking and BM25L.** Measured again on this corpus in D-041:
+coverage re-weighting is flat or worse (0.6688-0.6702 against 0.6702), BM25L's
+length compensation adds 0.0013 hit@1 at best. Both stay out of the product.
+
+## Query-side folding
+
+The largest single gain on this benchmark is not in the scorer (D-041). English
+questions spend much of their length on grammar, and answers state inflections
+the question did not use:
+
+```
+hit@1 0.6310 -> 0.6702   drop English stopwords, fold inflections on both sides
+hit@1 0.6702 -> 0.6826   reward adjacent query words (phrase bonus 0.3)
+```
+
+The first row costs nothing extra to query; the second builds a pair index, which
+roughly doubles rebuild time. `python -m bench.locomo.tuning_probe` reproduces
+every row, one variant at a time, including the sweep that picked 0.3.
 
 ## Sample isolation
 
@@ -97,7 +119,7 @@ the D-025 scope mechanism doing a real job rather than serving a leaderboard.
 - **It says nothing about PrecisionMemBench-style precision.** There, a single
   extra result fails a case; here, top-5 is fine. Same store, opposite tuning.
 - **It says nothing about answer quality.** No generator ran.
-- **0.6270 is not a state-of-the-art claim.** It is a baseline with no model, on
+- **0.6826 is not a state-of-the-art claim.** It is a baseline with no model, on
   a benchmark where most published systems spend tokens on every step.
 
 ## Data provenance
@@ -126,8 +148,8 @@ question for reasons having nothing to do with retrieval.
 a transport or rate-limit failure surfacing as `None`, which means an accuracy
 number from this path would measure API reliability as much as memory quality.
 
-Both are fixable. Neither is fixed, so no number is published. `hit@5 = 0.8850`
-remains the honest bound: retrieval finds the answer's session 88.5% of the time,
+Both are fixable. Neither is fixed, so no number is published. `hit@5 = 0.9020`
+remains the honest bound: retrieval finds the answer's session 90.2% of the time,
 and what a reader does with it is unmeasured.
 
 Running this properly would need session dates in the evidence block,

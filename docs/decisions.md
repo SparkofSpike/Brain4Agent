@@ -2243,3 +2243,119 @@ caller knows and what the store can say, not a new scorer.
 **What remains.** The local store's tags are free-form (`trms`, `geo_3.0`,
 `bug`). Nothing enforces a vocabulary, and nothing maps a new memory to an
 existing project tag. A schema on `kind` remains unbuilt, as the README says.
+
+## D-041 English query folding: stopwords, stems, and adjacency
+
+**Date:** 2026-11-10
+**Status:** Shipped. Chinese unchanged, LongMemEval unchanged, LoCoMo and
+PrecisionMemBench up.
+
+**Context.** LoCoMo was the weakest published number: hit@1 0.6310 over 1531
+answerable questions. A rank histogram of the misses showed the shape clearly:
+966 questions already rank the gold session first, then 200 rank it second, 105
+third. It is mostly not a recall problem -- the answer is in the candidate set
+and loses the top slot by a hair. Two of the failures sampled showed the same
+mechanism twice:
+
+- The question's words were mostly grammar. `When did Melanie sign up for a
+  pottery class?` spends five of nine terms on `when/did/for/a` (plus the
+  trailing `?`), none of which separates one session from another.
+- The answer used a different inflection. `Where has Melanie camped?` asked in
+  the past tense while the memory said `camping`; without folding they are two
+  different tokens, so only one side of the question could match.
+
+Chinese already had both fixes in a narrower form: interrogatives are dropped
+from the query side (D-037), and character bigrams make every inflection
+question moot. English had neither.
+
+**What changed.** Three mechanisms, all model-free, all in `tokenize.py`:
+
+1. **English stopwords on the query side only.** `EN_STOPWORDS` -- articles,
+   auxiliaries, pronouns, prepositions, question words. The index keeps them: a
+   memory containing `the` does not become more precise by hiding it.
+2. **English inflection folding on both sides.** `stem_term` is a handful of
+   suffix rules (`ies -> y`, `sses/shes/ches -> ss/sh/ch`, `ing`, `ed`, plural
+   `s`), applied to ASCII alphabetic terms of four letters or more. It is not a
+   linguist's stemmer; consistency is the goal, and both sides run it, so a
+   crude stem that is wrong in the same way still matches. Applied at *index
+   time* through `BM25(normalize=...)` rather than baked into the persisted
+   token column, so an existing database needs no migration: stored tokens stay
+   verbatim and are folded when the in-memory index is built.
+3. **Adjacency bonus for ASCII word pairs.** A document containing two adjacent
+   query terms in the same order earns `0.3 * (idf(a) + idf(b))`. A name like
+   `pottery class` or `mental health` is one idea; BM25 discards the adjacency.
+   Only ASCII alphabetic pairs are collected, which keeps the pair index small
+   and makes the Chinese path a no-op by construction -- Chinese bigrams already
+   index every adjacent character pair.
+
+**Measured.** LoCoMo, through `bench.locomo.run`, one change at a time:
+
+| configuration | hit@1 | hit@5 | hit@10 | MRR |
+|---|---|---|---|---|
+| before (D-037/D-038 state) | 0.6310 | 0.8870 | 0.9484 | 0.7402 |
+| + English stopwords | 0.6532 | 0.8916 | 0.9425 | 0.7552 |
+| + stem folding | 0.6525 | 0.8935 | 0.9556 | 0.7550 |
+| stopwords + stems | **0.6702** | **0.9020** | **0.9556** | **0.7712** |
+| + phrase bonus 0.3 | **0.6826** | 0.9020 | 0.9549 | **0.7784** |
+
+The two filters interact: stopwords alone give back 0.006 of hit@10, stems
+alone give back 0.013 of hit@10 and 0.015 of hit@5. Together they beat either
+on every column. Hit@10 gave up one question to the phrase bonus (0.9556 ->
+0.9549); it is 0.0065 above where this benchmark started.
+
+Different corpora, different jobs, so the two implementations differ:
+
+- Chinese retrieval is **unchanged** on every metric: 0.9500 / 1.0000 / 1.0000
+  / 0.9613. The stopword list is English; the stemmer refuses non-ASCII; the
+  pair index refuses non-ASCII. Measured, not hoped for.
+- PrecisionMemBench **72/77 -> 74/77** total (active stays 42/43). Dropping
+  `what/the/in` from the query made two scope-bleed cases fall out of the result
+  set, which is the benchmark agreeing with D-025: a query's grammar is not a
+  memory. `active` did not move because the two cases it gained were not
+  retrieval-dependent.
+- LongMemEval is **unchanged**: 0.8660 / 0.9511 / 0.9660 / 0.8990. Its harness
+  uses `tokenize` directly, and that function was not touched; the folding lives
+  in `BM25.normalize` and `query_tokens`.
+- The real store (2,903 memories, D-040's leave-one-out keyword probe, 300
+  queries): hit@1 0.460 -> 0.470, hit@5 0.650 -> 0.653, MRR 0.544 -> 0.551;
+  two-keyword queries 0.27 -> 0.29. The queries an agent actually types are
+  already nouns, so the stopword list does little there and nothing regressed.
+  Measured on a copy of the store, since `search` writes access counters.
+
+**Cost.** The pair index roughly doubles rebuild time on the LoCoMo fixture,
+which is 272 documents of long conversation:
+
+```
+                    rebuild    query
+phrase bonus off    267 ms     10.2 ms
+phrase bonus on     520 ms     10.2 ms
+```
+
+Rebuild happens once per process or after a write, not per query, and the query
+path is unchanged. For a 44-session Chinese corpus rebuild is 8.7 ms.
+
+**Rejected.** Measured on the same fixture, discarded:
+
+| change | hit@1 | verdict |
+|---|---|---|
+| BM25L length compensation (delta 0.5) | 0.6715 | +0.0013, noise |
+| coverage re-rank (multiply by 1 + a(cov-1)) | 0.6688-0.6702 | flat or worse |
+| distinct-term-count re-rank | 0.6728 | +0.0026, below the phrase bonus |
+
+Coverage re-ranking failing is the third such result (D-020, D-024, D-039). It
+says the same thing each time: BM25's order already contains the information a
+post-hoc coverage term would add. The phrase bonus is different in kind -- it
+recovers an ordering fact BM25 threw away, not a weighted copy of what it used.
+
+**Caveats.**
+
+- The stemmer is crude on purpose. `analysis -> analysi`, `boxes -> boxe`; both
+  sides agree, so matching works and the token is not something a human reads.
+- The stopword list is hand-written and English. A domain where `before` or
+  `under` carries meaning would want a different list; none of the three
+  benchmarks does, and LoCoMo's questions are ordinary conversation.
+- The phrase bonus needs its pair index. It is off by default in `BM25` and on
+  in `MemoryStore`, where the measured cost is paid once per rebuild.
+- Every number above is retrieval, not answer quality. Nothing here changes the
+  claim in D-011: the store reports evidence and the caller decides.
+

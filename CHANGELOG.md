@@ -36,6 +36,12 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - LoCoMo: hit@1 0.6270 → 0.6310, MRR 0.7369 → 0.7402, from the same fuzzy path.
   LongMemEval is unchanged; its harness keeps bigrams, which measured better and
   8× faster than the store's tokenisers on the same tasks.
+- English retrieval: LoCoMo hit@1 0.6310 → 0.6826, hit@5 0.8870 → 0.9020,
+  hit@10 0.9484 → 0.9549, MRR 0.7402 → 0.7784. English stopwords are dropped
+  from the query side, inflections are folded on both sides at index time
+  (`camped` matches `camping`), and two adjacent query words earn a small bonus
+  when a memory contains them adjacent (`pottery class`). PrecisionMemBench total
+  72/77 → 74/77. Chinese and LongMemEval are unchanged (D-041).
 
 ### Fixed
 
