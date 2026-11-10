@@ -46,8 +46,8 @@
 ## 安装
 
 ```bash
-pip install "Brain4Agent[precise]"   # 推荐：加上 jieba，hit@1 0.925
-pip install Brain4Agent              # 零依赖：只用二元组，hit@1 0.825
+pip install "Brain4Agent[precise]"   # 推荐：加上 jieba，hit@1 0.950
+pip install Brain4Agent              # 零依赖：只用二元组，hit@1 0.875
 ```
 
 Windows 和 macOS 都可用；需要 Python 3.11 或更新版本。
@@ -203,15 +203,17 @@ if judge:
 
 ### 读写分词器分离
 
-索引和查询用不同的分词器。3×3 网格实测：
+索引和查询用不同的分词器。3×3 网格实测（D-019），以及之后的两次改进（D-037）：
 
 | 索引 | 查询 | hit@1 | MRR |
 |---|---|---|---|
 | bigram | bigram | 0.825 | 0.891 |
 | jieba | jieba | 0.875 | 0.911 |
-| **二元组 + 词** | **词** | **0.925** | **0.940** |
+| 二元组 + 词 | 词 | 0.925 | 0.940 |
+| **二元组 + 词** | **词 − 疑问词** | **0.950** | **0.961** |
 
-见 [D-019](docs/decisions.md#d-019-index-wide-query-narrow)。
+最后一行在 3×3 网格之外多做了两件事：查询侧去掉疑问词，会话分数取最好的
+三轮折叠。
 
 ### 证据，而非结论
 
@@ -243,9 +245,9 @@ MRR      0.8990
 | 基准 | 指标 | 本存储 | 最好的第三方 |
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
-| PrecisionMemBench | active | **34/43** | 18/43（open-knowledge-format） |
-| PrecisionMemBench | total | **64/77** | 36/77（open-knowledge-format） |
-| LoCoMo | hit@1 | **0.6270** | 不可比 |
+| PrecisionMemBench | active | **42/43** | 18/43（open-knowledge-format） |
+| PrecisionMemBench | total | **72/77** | 36/77（open-knowledge-format） |
+| LoCoMo | hit@1 | **0.6310** | 不可比 |
 
 ### PrecisionMemBench — 检索精度
 
@@ -254,9 +256,15 @@ MRR      0.8990
 因为 77 个用例里有 33 个空库也能通过。
 
 ```
-active  34/43 = 0.7907     需要查询相关检索的用例
- total  64/77 = 0.8312     包含任何存储都能过的用例
+active  42/43 = 0.9767     需要查询相关检索的用例
+ total  72/77 = 0.9351     包含任何存储都能过的用例
 ```
+
+这里提升了两处：结果集大小改为按查询中出现的名称数量决定，不再对八个词以下的
+查询硬编码 `top_k=1`；名称只统计当前 scope 可见的信念。名称匹配从子串改为整词，
+`pipe` 不会再命中 `pipeline`。另外加入了一次编辑距离的模糊匹配
+（`typscript` → `typescript`，`mongod` → `mongodb`）。见
+[D-038](docs/decisions.md#d-038-sizing-the-result-set-and-matching-one-edit-away)。
 
 官方表格，来自基准自己的站点（`tenureai.dev/benchmark`）：
 
@@ -264,7 +272,7 @@ active  34/43 = 0.7907     需要查询相关检索的用例
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              34/43     64/77
+this store              42/43     72/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -285,38 +293,40 @@ a-mem                    0/43      7/77
 1540 个问题，272 个会话，5882 轮。
 
 ```
-hit@1   0.6270
-hit@5   0.8850
-hit@10  0.9471
-MRR     0.7369
+hit@1   0.6310
+hit@5   0.8870
+hit@10  0.9484
+MRR     0.7402
 ```
 
 `python -m bench.locomo.run`——不涉及模型，数据已提交。
 这些是会话检索命中率，不是 LLM judge 下的答案准确率，
 所以和公开的 LoCoMo 数字不可比。
 
-索引单轮而不是会话，会损失 8.2 个点的 hit@1（0.5447 → 0.6270）。
+索引单轮而不是会话，会损失 2.5 个点的 hit@1（0.6022 → 0.6310），分词器和
+评分不变。
 
 ### 中文基准
 
 59 个问题（40 个可答，19 个不可答），44 个会话。
 
-| 指标 | bigram/bigram | 二元组+词 / 词 |
+| 指标 | bigram/bigram | 当前 |
 |---|---|---|
-| hit@1 | 0.825 | **0.925** |
-| hit@5 | 0.950 | **0.975** |
+| hit@1 | 0.825 | **0.950** |
+| hit@5 | 0.950 | **1.000** |
 | hit@10 | 1.000 | 1.000 |
-| MRR | 0.891 | **0.940** |
+| MRR | 0.891 | **0.961** |
 
+`当前` = 索引 `二元组 + 词`，查询 `词 − 疑问词`，会话取最好的三轮折叠（D-037）。
 hit@10 已经饱和；只有 hit@1 和 MRR 有区分度。
 
 ### 这个数字在哪里失效
 
-**0.925 描述的是 44 个会话。密集的近重复会让它崩掉。**
+**0.950 描述的是 44 个会话。密集的近重复会让它崩掉。**
 
 | 语料 | hit@1 | hit@5 |
 |---|---|---|
-| 44 个会话 | 0.925 | 0.975 |
+| 44 个会话 | 0.950 | 1.000 |
 | +300 个同主题会话 | 0.000 | 0.000 |
 
 问「根因在哪个文件哪一行」时，一个说「看了某个文件、某一行」的含糊会话，
@@ -377,14 +387,17 @@ hit@10 已经饱和；只有 hit@1 和 MRR 有区分度。
 
 **新增：** 近重复检测（`duplicates_of`，SimHash；只报告不合并，
 不放在检索路径上）和 weight（`reinforce`、`decay`、`prune_by_weight`）。
+检索侧会从查询里去掉疑问词，把会话最好的三轮折叠成一个分数，并对一个
+语料里从未出现过的英文词做一次编辑距离的模糊匹配（D-037、D-038）。
 
 **未实现：** 跨会话综合、多模态、`kind` 的 schema、多检索器融合、
 召回调度器、按时间衰减的遗忘。
 
-**测过并否决：** 查询时图遍历（D-024）、写入时抽取（D-023）。
+**测过并否决：** 查询时图遍历（D-024）、写入时抽取（D-023）、把 LoCoMo 会话
+切块检索（D-037）、用 store 自己的分词器跑 LongMemEval（D-037）。
 
 发布历史见 [CHANGELOG.md](CHANGELOG.md)。[决策日志](docs/decisions.md)记录了
-36 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
+38 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
 
 ## 参与贡献
 
@@ -397,8 +410,8 @@ python -m bench.pmb.run
 python -m bench.locomo.run
 ```
 
-`bench/zh/e2e.py` 应报告 `hit@1 0.9250`；`bench.pmb.run` 应报告 `pass 64/77`；
-`bench.locomo.run` 应报告 `hit@1 0.6270`。低于这些就是回归。后两个不需要
+`bench/zh/e2e.py` 应报告 `hit@1 0.9500`；`bench.pmb.run` 应报告 `pass 72/77`；
+`bench.locomo.run` 应报告 `hit@1 0.6310`。低于这些就是回归。后两个不需要
 API key，也不需要网络。改动某条设计决策，应该在 `docs/decisions.md` 里
 新增一条，附上支撑它的测量。
 

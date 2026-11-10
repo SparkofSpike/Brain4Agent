@@ -47,8 +47,8 @@ Memories also carry `tags` (scope), `superseded_by` (replacement) and `refs`
 ## Install
 
 ```bash
-pip install "Brain4Agent[precise]"   # recommended: adds jieba, hit@1 0.925
-pip install Brain4Agent              # zero dependencies: bigrams only, hit@1 0.825
+pip install "Brain4Agent[precise]"   # recommended: adds jieba, hit@1 0.950
+pip install Brain4Agent              # zero dependencies: bigrams only, hit@1 0.875
 ```
 
 Windows and macOS both work; Python 3.11 or newer is required. The package is on
@@ -209,15 +209,21 @@ and 0.25 s inside `batch()`.
 ### Read/write tokenizer split
 
 Indexing and querying use different tokenizers. Measured over a 3×3 grid of
-index strategy against query strategy:
+index strategy against query strategy (D-019), then two changes on top of the
+best cell (D-037):
 
 | index | query | hit@1 | MRR |
 |---|---|---|---|
 | bigram | bigram | 0.825 | 0.891 |
 | jieba | jieba | 0.875 | 0.911 |
-| **bigrams + words** | **words** | **0.925** | **0.940** |
+| bigrams + words | words | 0.925 | 0.940 |
+| **bigrams + words** | **words − question words** | **0.950** | **0.961** |
 
-See [D-019](docs/decisions.md#d-019-index-wide-query-narrow).
+The last row adds two things the 3×3 grid did not test: interrogatives are
+removed from the query side, and a session's best three turns are folded into
+one score. Both are measured in
+[D-037](docs/decisions.md#d-037-query-side-question-words-and-session-folding);
+the first 3×3 grid is [D-019](docs/decisions.md#d-019-index-wide-query-narrow).
 
 ### Evidence, not verdicts
 
@@ -246,14 +252,19 @@ MRR      0.8990
 `python -m bench.run_longmemeval --dataset s`. `bench/data/` is fetched by
 `bench/fetch_data.py` (264 MB, not committed).
 
+These use the harness's bigram/bigram configuration. The store's own
+configuration (wide index, words minus question words, fuzzy) scored 0.8596 on
+the same 500 tasks and took 8× longer, so LongMemEval keeps bigrams — measured,
+not assumed.
+
 Across three benchmarks:
 
 | benchmark | metric | this store | best third-party |
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
-| PrecisionMemBench | active | **34/43** | 18/43 (open-knowledge-format) |
-| PrecisionMemBench | total | **64/77** | 36/77 (open-knowledge-format) |
-| LoCoMo | hit@1 | **0.6270** | not comparable |
+| PrecisionMemBench | active | **42/43** | 18/43 (open-knowledge-format) |
+| PrecisionMemBench | total | **72/77** | 36/77 (open-knowledge-format) |
+| LoCoMo | hit@1 | **0.6310** | not comparable |
 
 ### PrecisionMemBench — retrieval precision
 
@@ -262,9 +273,18 @@ answer is the set of belief IDs the store returns. `active` is the honest
 column, because 33 of the 77 cases pass with an empty store.
 
 ```
-active  34/43 = 0.7907     cases that need query-dependent retrieval
- total  64/77 = 0.8312     including cases any store passes
+active  42/43 = 0.9767     cases that need query-dependent retrieval
+ total  72/77 = 0.9351     including cases any store passes
 ```
+
+Three changes lifted this from 34/43 and 64/77. The result set is now sized from
+the names a query contains at every length, and only from beliefs the case's
+scope can see — the old rule forced `top_k=1` below eight words and counted
+out-of-scope beliefs. Whole-word name matching replaced substring matching, so
+`pipe` no longer matches inside `pipeline`. A fuzzy query path then matches a
+misspelt English word against a corpus word one edit away (`typscript` →
+`typescript`, `mongod` → `mongodb`). See
+[D-038](docs/decisions.md#d-038-sizing-the-result-set-and-matching-one-edit-away).
 
 Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 
@@ -272,7 +292,7 @@ Official table, from the benchmark's own site (`tenureai.dev/benchmark`):
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              34/43     64/77
+this store              42/43     72/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -294,38 +314,41 @@ implementation scores 43/43 and 77/77.
 1540 questions over 272 sessions, 5882 turns.
 
 ```
-hit@1   0.6270
-hit@5   0.8850
-hit@10  0.9471
-MRR     0.7369
+hit@1   0.6310
+hit@5   0.8870
+hit@10  0.9484
+MRR     0.7402
 ```
 
 `python -m bench.locomo.run` — no model, data committed. These are session
 retrieval rates, not answer accuracy under an LLM judge, so they are not
 comparable to published LoCoMo numbers.
 
-Indexing turns instead of sessions costs 8.2 points of hit@1 (0.5447 → 0.6270).
+Indexing turns instead of sessions costs 2.5 points of hit@1 (0.6022 → 0.6310),
+same tokenisers and scoring.
 
 ### Chinese benchmark
 
 59 questions (40 answerable, 19 unanswerable), 44 sessions.
 
-| metric | bigram/bigram | bigrams+words / words |
+| metric | bigram/bigram | current |
 |---|---|---|
-| hit@1 | 0.825 | **0.925** |
-| hit@5 | 0.950 | **0.975** |
+| hit@1 | 0.825 | **0.950** |
+| hit@5 | 0.950 | **1.000** |
 | hit@10 | 1.000 | 1.000 |
-| MRR | 0.891 | **0.940** |
+| MRR | 0.891 | **0.961** |
 
-hit@10 is saturated; only hit@1 and MRR discriminate.
+`current` is index `bigrams + words`, query `words minus interrogatives`, and
+sessions folded from their best three turns (D-037). hit@10 is saturated; only
+hit@1 and MRR discriminate.
 
 ### Where the Chinese number stops holding
 
-**0.925 describes 44 sessions. Dense near-duplicates collapse it.**
+**0.950 describes 44 sessions. Dense near-duplicates collapse it.**
 
 | corpus | hit@1 | hit@5 |
 |---|---|---|
-| 44 sessions | 0.925 | 0.975 |
+| 44 sessions | 0.950 | 1.000 |
 | +300 same-topic sessions | 0.000 | 0.000 |
 
 Asked which file and line caused a bug, a vague session saying "some file, some
@@ -388,16 +411,19 @@ Library, CLI and MCP server are complete.
 
 **New:** near-duplicate detection (`duplicates_of`, SimHash; reports, does not
 merge, and is not on the search path) and weight (`reinforce`, `decay`,
-`prune_by_weight`).
+`prune_by_weight`). Retrieval drops question words from the query side, folds a
+session's best three turns into one score, and matches an unknown English word
+one edit away from a corpus word (D-037, D-038).
 
 **Not built:** cross-session synthesis, multimodal, schema on `kind`,
 multi-retriever fusion, a recall scheduler, time-decayed forgetting.
 
 **Measured and rejected:** query-time graph traversal (D-024), write-time
-extraction (D-023).
+extraction (D-023), chunking LoCoMo sessions for retrieval, running LongMemEval
+on the store's own tokenisers (D-037), chunking LoCoMo sessions (D-037).
 
 Release history is in [CHANGELOG.md](CHANGELOG.md). The
-[decision log](docs/decisions.md) records 36 entries; the
+[decision log](docs/decisions.md) records 38 entries; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the field.
 
@@ -412,8 +438,8 @@ python -m bench.pmb.run
 python -m bench.locomo.run
 ```
 
-`bench/zh/e2e.py` should report `hit@1 0.9250`; `bench.pmb.run` `pass 64/77`;
-`bench.locomo.run` `hit@1 0.6270`. Lower is a regression. The last two need no
+`bench/zh/e2e.py` should report `hit@1 0.9500`; `bench.pmb.run` `pass 72/77`;
+`bench.locomo.run` `hit@1 0.6310`. Lower is a regression. The last two need no
 API key and no network. Changes to a design decision belong in
 `docs/decisions.md` as a new entry, with the measurement that justifies it.
 

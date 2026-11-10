@@ -2013,3 +2013,128 @@ positional argument of `Evidence` keeps its meaning. No ranking change:
 
 **Verified.** `test_credits_the_matching_turn_not_the_first`: first turn 0,
 matching turn 1. The existing single-turn access-count tests are unchanged.
+
+## D-037 Query-side question words and session folding
+
+**Date:** 2026-11-10
+**Status:** Measured and shipped
+
+**Context.** After D-019 the Chinese benchmark sat at hit@1 0.9250 / MRR 0.9404.
+Two things had never been measured: whether question words belong in the query at
+all, and whether a session's turns should be scored as one unit instead of taking
+the best one. D-019 had tested a broader filter (`content`: every single-character
+word and punctuation) and rejected it at 0.9000.
+
+**Evidence.** `bench/zh/tuning_probe.py`, 40 answerable questions, one store.
+
+```
+query-side question words   hit@1 0.9500  hit@5 1.0000  MRR 0.9600
+top-3 fold, beta 0.5        hit@1 0.9500  hit@5 1.0000  MRR 0.9613
+```
+
+1. **Question words are query-side noise.** Dropping 哪个/为什么/哪里/什么 from
+the query moved hit@1 0.9250 → 0.9500 and MRR 0.9404 → 0.9600. The visible gain
+is zh032, the only temporal question: 哪个 matched S29's "什么时候用哪个" while
+the session that actually answers the question never contains it. This is
+narrower than D-019's filter — 和/先/做 carry signal on this corpus, 哪个 does
+not — and the two measurements are consistent rather than contradictory.
+
+2. **A session is more than its best turn.** Folding the best three turns
+(`max + 0.5 × next two`) added MRR 0.9613. Without the question-word filter the
+same fold also lifted hit@1 from 0.9250 to 0.9500; the two overlap on zh032, and
+the filter is the cheaper half. The beta curve is flat from 0.1 to 1.5 — 0.5 is
+a point on a plateau, not a fitted constant.
+
+3. **BM25's own parameters are flat.** A 25-cell k1/b grid spanned hit@1
+0.9000–0.9250 and MRR 0.9294–0.9437, with every useful cell within 0.0025 of the
+default. Recorded so it is not swept again.
+
+**Shipped.** `tokenize.query_tokens()` drops interrogatives before matching;
+`MemoryStore._fold_sessions` scores a session from its best three turns. The
+interrogative list moved to `tokenize.py` so the query side and `corpus_missing`
+share one definition instead of two that can drift.
+
+**Cross-benchmark check.** LoCoMo moved hit@1 0.6270 → 0.6310 and MRR 0.7369 →
+0.7402 from the fuzzy path in D-038; the question-word list is Chinese and does
+not touch English queries. `bench/zh/missing_terms_signal` held at keep 0.875 /
+refuse 0.632.
+
+**Measured and rejected: LongMemEval on the store's tokenisers.** Wide index +
+words + fuzzy scored 0.8596 hit@1 against 0.8660 for the harness's bigram/bigram,
+and took 613 s against 78 s over the same 500 tasks. English already tokenises on
+whitespace; the wide index and jieba add cost without a matching path to exploit.
+The benchmark keeps bigrams.
+
+**Measured and rejected: chunking LoCoMo sessions.** Chunks of 12 turns reached
+hit@1 0.6434 against 0.6270 for whole sessions, but only with no session fold.
+Under the product's fold every chunk size lost (0.6192 at 3 turns, 0.5911 at 8).
+A benchmark setting cannot opt out of the product's scoring rule, so the idea is
+recorded and not shipped. `bench/locomo/chunk_probe.py` reproduces it.
+
+**Fallback.** Without jieba the query side is bigrams and the tokeniser split is
+gone, but `_fold_sessions` still applies: measured 0.875 hit@1 against 0.825 for
+the old fallback. The zero-dependency install is weaker, not broken.
+
+**What this does not fix.** zh001 (rank 4) and zh013 (rank 5) remain wrong. Both
+need the reader's judgement, not a better bag of words: zh001 asks why a search
+failed, and the corpus contains both the symptom session and the root-cause
+session; zh013 asks what is hard about abstention, and the corpus contains a
+session about why abstention matters. D-020's limit is unchanged: a dense
+same-topic corpus still collapses hit@1 to zero.
+
+## D-038 Sizing the result set and matching one edit away
+
+**Date:** 2026-11-10
+**Status:** Measured and shipped
+
+**Context.** D-026 left PrecisionMemBench at 34/43 active and 64/77 total and
+named the residue: ordering and fuzzy matching ("k9s" for k8s, "mango" for
+MongoDB). The harness also carried a rule that forced `top_k=1` for queries
+shorter than eight words.
+
+**Evidence.** `bench/pmb/run.py`, one change at a time, 43 active cases.
+
+```
+baseline (D-026)                       34/43 active   64/77 total
+top_k from visible names, any length   36/43          66/77
+whole-word name matching               38/43          68/77
+one-edit fuzzy matching                42/43          72/77
+```
+
+1. **The length cut was truncating real multi-entity questions.** "What's Redis
+doing?" names two beliefs that share the alias Redis; "explicit error returns in
+pipe transforms" names two in six words. Counting names at every length fixed
+both. Counting every belief regardless of the case's scope made it worse
+(32/43): "Redis" matched a belief the tag filter would exclude, over-sized
+top_k, and let noise in. The rule now counts only beliefs the case's scope can
+see.
+2. **Substring matching counted words the query did not say.** "pipe" inside
+"pipeline" made b-functional-pipeline look named by a Kubernetes question;
+"work" inside "working" did the same. Whole-word matching fixed both.
+3. **One-edit matching is the last rule-shaped win.** An English word the corpus
+has never contained is also matched against a corpus word one edit away: a
+substitution, an insertion/deletion, or an adjacent transposition. That covers
+`typscript` → `typescript`, `typsecript` → `typescript`, `mongod` → `mongodb` and
+`mongoose` → `moongoose`. Four cases, +4 active.
+
+**Shipped.** `BM25(fuzzy=True)`, armed by `MemoryStore`. Guards: ASCII letters
+only, at least six letters, and only when the word is absent from the corpus.
+Those guards are the difference between a spelling correction and rewriting half
+of an English query (`test` → `tests` is a legitimate edit and not a misspelling).
+The candidate with the highest document frequency wins, so the more common
+spelling is chosen when two are one edit away.
+
+**Cost.** The fuzzy vocabulary is built once per index from ASCII alphabetic
+terms; a Chinese query never enters the loop. The candidate scan is linear in
+that vocabulary and runs only for a query word absent from the corpus --
+sub-millisecond at PMB's 35 beliefs and LoCoMo's 272 sessions, and it would need
+length bucketing before a 10⁵-term vocabulary. That is a stated boundary, not a
+measured one. LoCoMo gained 0.004 hit@1 and 0.003 MRR from the same path, so the
+English effect is not PMB-specific.
+
+**What remains.** Five cases. `filter-resolved-at-excluded` and
+`scope-bleed-questions-code-excludes-writing` need a relevance verdict that
+D-008/D-012 measured as unavailable without a model. `cap-stress` is an ordering
+failure, not a selection one. `cold-start-user-no-beliefs` is the harness: it
+scores every case as `test-user`, while the fixture expects a `brand-new-user`
+empty context. The benchmark's own reference implementation still scores 43/43.
