@@ -121,6 +121,11 @@ class SearchResult:
     corpus_terms: int
     sessions_searched: int
     corpus_missing: list[str] = field(default_factory=list)
+    # How many sessions each query term appears in. An agent that gets a pile of
+    # near-identical memories can read this and learn that its two words are too
+    # common -- GEO appears in 42 sessions, so the query needs a third word, not
+    # a better ranking. Reported as a count, not advice (D-039).
+    term_frequencies: dict[str, int] = field(default_factory=dict)
 
     @property
     def empty(self) -> bool:
@@ -242,6 +247,10 @@ def build_evidence(
     texts = list(session_text.values())
     joined = "\n".join(texts)
     corpus_missing = [t for t in q_terms if t not in joined]
+    # Counted here rather than only on the non-empty path: a query that matches
+    # nothing still needs to say whether that is because the words are absent
+    # (0) or because they are everywhere but together mean nothing.
+    term_frequencies = {t: sum(1 for x in texts if t in x) for t in q_terms}
 
     if not hits:
         return SearchResult(
@@ -250,6 +259,7 @@ def build_evidence(
             corpus_terms=0,
             sessions_searched=sessions_searched,
             corpus_missing=corpus_missing,
+            term_frequencies=term_frequencies,
         )
 
     n_sessions = len(by_session) or 1
@@ -259,7 +269,7 @@ def build_evidence(
     # to top_k+1 times over the whole corpus. Measured: build_evidence was 10.9 ms
     # of a 13.8 ms query, and almost all of it was re-walking texts looking for
     # words it had already looked for.
-    _df_cache: dict[str, int] = {}
+    _df_cache: dict[str, int] = dict(term_frequencies)
 
     def idf(term: str) -> float:
         d = _df_cache.get(term)
@@ -303,19 +313,29 @@ def build_evidence(
         corpus_terms=corpus_terms,
         sessions_searched=sessions_searched,
         corpus_missing=corpus_missing,
+        term_frequencies=term_frequencies,
     )
 
 
 def describe(result: SearchResult) -> str:
     """Human-readable summary of a search."""
+    freq = ""
+    if result.term_frequencies:
+        freq = "  term frequency: " + ", ".join(
+            f"{t}={n}" for t, n in result.term_frequencies.items()
+        )
     if result.empty:
         line = f"no evidence for {result.query!r}"
         if result.corpus_missing:
             line += f"\n  corpus has no: {', '.join(result.corpus_missing)}"
+        if freq:
+            line += "\n" + freq
         return line
     lines = [f"{len(result.evidence)} sessions for {result.query!r}"]
     if result.corpus_missing:
         lines.append(f"  corpus has no: {', '.join(result.corpus_missing)}")
+    if freq:
+        lines.append(freq)
     for e in result.evidence:
         missing = f"  session lacks: {', '.join(e.missing_terms)}" if e.missing_terms else ""
         lines.append(f"  [{e.score:5.2f} cov={e.coverage:.2f}] {e.session_id}{missing}")

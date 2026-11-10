@@ -69,6 +69,19 @@ class TestSearch:
             for e in store.search("杭州测试机的地址", top_k=3).evidence:
                 assert 0.0 <= e.coverage <= 1.0
 
+    def test_term_frequencies_count_sessions(self, tmp_path: Path) -> None:
+        """An agent needs to know when its query words are everywhere (D-039)."""
+        with _seeded(tmp_path) as store:
+            store.add("媒体平台凭据误报", session_id="s4")
+            r = store.search("媒体 投稿", top_k=5)
+            assert r.term_frequencies.get("媒体") == 2
+            assert r.term_frequencies.get("投稿") == 1
+
+    def test_term_frequencies_report_absent_terms(self, tmp_path: Path) -> None:
+        with _seeded(tmp_path) as store:
+            r = store.search("zzzqqq", top_k=1)
+            assert r.term_frequencies == {"zzzqqq": 0}
+
     def test_empty_corpus_query_returns_no_evidence(self, tmp_path: Path) -> None:
         with _seeded(tmp_path) as store:
             r = store.search("zzzz", top_k=3)

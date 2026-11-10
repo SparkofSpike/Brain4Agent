@@ -94,7 +94,10 @@ TOOLS: list[dict[str, Any]] = [
             "treats as central that appear nowhere in the whole stored corpus -- the "
             "strong signal, and the closest thing to a free answer to 'do I know "
             "this'. `missing_terms` on each session is just why that session ranked "
-            "where it did. Whether to abstain is the caller's call."
+            "where it did. `term_frequencies` says how many sessions each query "
+            "word appears in: a word present in hundreds of memories is not "
+            "missing and not a typo, it is too common to separate anything, and "
+            "the query needs another word. Whether to abstain is the caller's call."
         ),
         "inputSchema": {
             "type": "object",
@@ -273,6 +276,7 @@ class Server:
                         "query": query,
                         "sessions_searched": result.sessions_searched,
                         "corpus_missing": result.corpus_missing,
+                        "term_frequencies": result.term_frequencies,
                         "note": (
                             "no session shares any term with the query"
                             if not result.corpus_missing
@@ -289,6 +293,7 @@ class Server:
             "query": query,
             "sessions_searched": result.sessions_searched,
             "corpus_missing": result.corpus_missing,
+            "term_frequencies": result.term_frequencies,
             "evidence": [
                 {
                     "session_id": e.session_id,
