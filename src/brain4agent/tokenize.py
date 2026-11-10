@@ -91,6 +91,171 @@ INTERROGATIVES = frozenset(
 
 _CJK_RUN = re.compile(f"[{_CJK_CLASS}]+|[^{_CJK_CLASS}]+")
 
+# English query-side stopwords. The same argument as INTERROGATIVES, one language
+# over: a question is built out of words an answer rarely repeats. Measured on
+# LoCoMo (272 sessions, 1540 questions, session-level index): dropping them moved
+# hit@1 0.6310 -> 0.6532 and MRR 0.7402 -> 0.7552, with hit@10 down 0.006 -- see
+# docs/decisions.md D-041. They stay in the *index*: a memory that happens to
+# contain "the" is not improved by hiding it, and dropping them from both sides
+# would only shorten documents.
+#
+# Chinese has its own, much smaller list above. Applying this one to Chinese text
+# is a no-op: jieba never emits these tokens for Han input.
+EN_STOPWORDS = frozenset(
+    [
+        "a",
+        "an",
+        "the",
+        "and",
+        "or",
+        "but",
+        "if",
+        "of",
+        "to",
+        "in",
+        "on",
+        "at",
+        "for",
+        "with",
+        "from",
+        "by",
+        "as",
+        "is",
+        "are",
+        "was",
+        "were",
+        "be",
+        "been",
+        "being",
+        "do",
+        "does",
+        "did",
+        "has",
+        "have",
+        "had",
+        "would",
+        "could",
+        "should",
+        "can",
+        "will",
+        "shall",
+        "may",
+        "might",
+        "must",
+        # Interrogatives, which the Chinese side filters separately above.
+        "what",
+        "when",
+        "where",
+        "who",
+        "whom",
+        "whose",
+        "which",
+        "why",
+        "how",
+        # Pronouns.
+        "i",
+        "you",
+        "he",
+        "she",
+        "it",
+        "we",
+        "they",
+        "me",
+        "him",
+        "her",
+        "us",
+        "them",
+        "my",
+        "your",
+        "his",
+        "its",
+        "our",
+        "their",
+        # Demonstratives and connectives that ask rather than answer.
+        "this",
+        "that",
+        "these",
+        "those",
+        "there",
+        "here",
+        "then",
+        "than",
+        "so",
+        "such",
+        "not",
+        "no",
+        "nor",
+        "too",
+        "very",
+        "about",
+        "into",
+        "over",
+        "under",
+        "again",
+        "further",
+        "once",
+        "all",
+        "any",
+        "both",
+        "each",
+        "few",
+        "more",
+        "most",
+        "other",
+        "some",
+        "only",
+        "own",
+        "same",
+        "up",
+        "down",
+        "out",
+        "off",
+        "during",
+        "before",
+        "after",
+        "above",
+        "below",
+        "between",
+    ]
+)
+
+
+def stem_term(term: str) -> str:
+    """Fold English inflection so a question and a memory share one stem.
+
+    Not a linguist's stemmer: a handful of suffix rules that make the shapes a
+    question actually takes -- ``camped``/``camping``/``camps``, ``stories``/
+    ``story``, ``class``/``classes`` -- collapse onto one token. Correction is
+    not the goal; consistency is. Both sides run this, so a crude stem that is
+    wrong in the same way on both sides still matches.
+
+    Guards that matter: ASCII letters only (Han, kana and Hangul pass through
+    untouched), and four letters or more, so 'is', 'was', 'his' and 'bus' are
+    not rewritten. Measured on LoCoMo as part of the query-side change in D-041:
+    hit@1 0.6310 -> 0.6525 alone, 0.6702 combined with stopword filtering
+    (bench/locomo/tuning_probe.py).
+
+    Idempotent by construction, which the query path relies on: a shipped query
+    is already stemmed, and the index applies this to the stored tokens a second
+    time. ``camp`` -> ``camp``, ``class`` -> ``class``, ``story`` -> ``story``.
+    """
+    if len(term) < 4 or not term.isascii() or not term.isalpha():
+        return term
+    if term.endswith("ies") and len(term) > 5:
+        return term[:-3] + "y"
+    if term.endswith(("sses", "shes", "ches")):
+        return term[:-2]
+    if term.endswith("ing") and len(term) > 6:
+        stem = term[:-3]
+        if len(stem) > 3 and stem[-1] == stem[-2]:
+            stem = stem[:-1]
+        return stem
+    if term.endswith("ed") and len(term) > 5:
+        return term[:-2]
+    if term.endswith("s") and not term.endswith("ss") and len(term) > 4:
+        return term[:-1]
+    return term
+
 
 # Latin letters that decompose to a base plus combining marks, built once at
 # import. `str.translate` walks this in C; the equivalent per-character loop was
@@ -302,13 +467,23 @@ def jieba_tokens(text: str) -> list[str]:
 
 
 def query_tokens(text: str) -> list[str]:
-    """The query-side tokeniser: dictionary words minus interrogatives.
+    """The query-side tokeniser: dictionary words, noise dropped, stems folded.
 
     The read side is where noise costs ranking; the write side is where dropping
     a clue costs recall. Question words are pure query-side noise: 哪个 matches
     S29's "什么时候用哪个" and every other question, and separates none of them.
+    English stopwords are the same shape of noise and are measured in D-041.
+
+    Terms are stemmed here as well as in the index. Doing it on the query side
+    only would leave ``camped`` unmatched against ``camp``; the index applies
+    ``stem_term`` to its stored tokens at load time, so the two sides agree
+    without rewriting anything already in the database.
     """
-    return [t for t in jieba_tokens(text) if t not in INTERROGATIVES]
+    return [
+        stem_term(t)
+        for t in jieba_tokens(text)
+        if t not in INTERROGATIVES and t not in EN_STOPWORDS
+    ]
 
 
 # jieba degrades super-linearly on one long unpunctuated run. Measured: 10k
@@ -381,6 +556,19 @@ def _within_one_edit(a: str, b: str) -> bool:
     return short[i:] == long[i + 1 :]
 
 
+def _phrasable(term: str) -> bool:
+    """Whether a term can take part in an ASCII phrase.
+
+    The phrase bonus exists for English, where a two-word name ("pottery
+    class", "mental health") is one idea and BM25 throws the adjacency away.
+    Chinese does not need it: character bigrams already index every adjacent
+    pair, so 中文查询 is partly in the index as 中文/文查/查询. Restricting the
+    path to ASCII alphabetic tokens keeps the pair index small and keeps the
+    Chinese benchmark untouched -- measured, not assumed (D-041).
+    """
+    return len(term) >= 2 and term.isascii() and term.isalpha()
+
+
 class BM25:
     """Okapi BM25 over a fixed corpus.
 
@@ -396,6 +584,18 @@ class BM25:
     transposition, a missing or extra letter). It is off by default because it
     trades exactness for recall and every published benchmark number was measured
     without it.
+
+    ``normalize`` folds a term on both sides before it is counted or looked up.
+    The store passes ``stem_term`` here so an inflection in a question matches
+    the same inflection in a memory. Applied at index time rather than baked into
+    the persisted token column, so changing the rule never leaves a stored index
+    speaking a vocabulary the query side no longer uses.
+
+    ``phrase_bonus`` rewards adjacency: a document containing two adjacent query
+    terms in the same order earns ``phrase_bonus * (idf(a) + idf(b))``. Off by
+    default, because it costs an extra pair index and only earns its keep where
+    names are multi-word. Measured on LoCoMo (D-041): hit@1 0.6702 -> 0.6826 and
+    MRR 0.7712 -> 0.7784 at 0.3, with hit@10 one question lower.
     """
 
     def __init__(
@@ -405,12 +605,16 @@ class BM25:
         index_fn: Callable[[str], list[str]] | None = None,
         query_fn: Callable[[str], list[str]] | None = None,
         fuzzy: bool = False,
+        normalize: Callable[[str], str] | None = None,
+        phrase_bonus: float = 0.0,
     ) -> None:
         self.k1 = k1
         self.b = b
         self.index_fn = index_fn or tokenize
         self.query_fn = query_fn or tokenize
         self.fuzzy = fuzzy
+        self.normalize = normalize or (lambda term: term)
+        self.phrase_bonus = phrase_bonus
         self._ids: list[str] = []
         self._docs: list[Counter[str]] = []
         self._lens: list[int] = []
@@ -423,6 +627,11 @@ class BM25:
         # the cost grows linearly with the corpus. Measured before adding it:
         # 20k documents took 144 ms per query and rising.
         self._postings: dict[str, list[tuple[int, int]]] = {}
+        # Adjacent ASCII word pairs -> documents containing that bigram, in
+        # order. One entry per document per pair: a session repeating a phrase
+        # ten times is not ten times more about it, and counting repeats would
+        # make the bonus a length signal in disguise.
+        self._pair_postings: dict[str, list[int]] = {}
         # Precomputed because idf depends only on df and n, and both are fixed
         # once indexing finishes. Recomputing it per (query, document, term) was
         # three logarithms per pair.
@@ -453,14 +662,24 @@ class BM25:
         self._lens = []
         self._df = Counter()
         self._postings = {}
+        self._pair_postings = {}
 
         for idx, (_, toks) in enumerate(items):
-            counts = Counter(toks)
+            seq = [self.normalize(t) for t in toks]
+            counts = Counter(seq)
             self._docs.append(counts)
             self._lens.append(sum(counts.values()))
             for term, tf in counts.items():
                 self._df[term] += 1
                 self._postings.setdefault(term, []).append((idx, tf))
+            if self.phrase_bonus > 0.0:
+                pairs = dict.fromkeys(
+                    f"{a} {b}"
+                    for a, b in zip(seq, seq[1:], strict=False)
+                    if _phrasable(a) and _phrasable(b)
+                )
+                for pair in pairs:
+                    self._pair_postings.setdefault(pair, []).append(idx)
 
         self._n = len(items)
         self._avgdl = (sum(self._lens) / self._n) if self._n else 0.0
@@ -511,7 +730,14 @@ class BM25:
     def search(self, query: str, top_k: int = 10) -> list[tuple[str, float]]:
         if not self._n:
             return []
-        q_terms = self.query_fn(query)
+        q_terms = [self.normalize(t) for t in self.query_fn(query)]
+        # Pairs are taken before fuzzy expansion: an appended correction is not
+        # adjacent to anything, and treating it as such would invent a phrase.
+        q_pairs = [
+            (a, b)
+            for a, b in zip(q_terms, q_terms[1:], strict=False)
+            if self.phrase_bonus > 0.0 and _phrasable(a) and _phrasable(b)
+        ]
         if self.fuzzy:
             q_terms = self._expand(q_terms)
         if not q_terms:
@@ -529,6 +755,14 @@ class BM25:
             return []
 
         avgdl = self._avgdl or 1.0
+        pair_bonus_by_doc: dict[int, float] = {}
+        for a, b in q_pairs:
+            postings = self._pair_postings.get(f"{a} {b}")
+            if not postings:
+                continue
+            weight = self._idf.get(a, 0.0) + self._idf.get(b, 0.0)
+            for idx in postings:
+                pair_bonus_by_doc[idx] = pair_bonus_by_doc.get(idx, 0.0) + weight
         scores: list[tuple[str, float]] = []
         for idx in candidates:
             counts = self._docs[idx]
@@ -540,6 +774,8 @@ class BM25:
                 if not tf:
                     continue
                 score += self._idf[term] * (tf * (self.k1 + 1.0)) / (tf + norm)
+            if pair_bonus_by_doc:
+                score += self.phrase_bonus * pair_bonus_by_doc.get(idx, 0.0)
             if score > 0.0:
                 scores.append((self._ids[idx], score))
 

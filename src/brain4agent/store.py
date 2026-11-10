@@ -35,7 +35,14 @@ from brain4agent.evidence import Evidence, JudgedResult, SearchResult, build_evi
 from brain4agent.extract import Extractor
 from brain4agent.simhash import DEFAULT_THRESHOLD, near_duplicate
 from brain4agent.simhash import fingerprint as simhash_of
-from brain4agent.tokenize import BM25, both_tokens, load_jieba, query_tokens, tokenize
+from brain4agent.tokenize import (
+    BM25,
+    both_tokens,
+    load_jieba,
+    query_tokens,
+    stem_term,
+    tokenize,
+)
 
 
 def _tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], list[str]]]:
@@ -45,6 +52,10 @@ def _tokenizers() -> tuple[Callable[[str], list[str]], Callable[[str], list[str]
     interrogatives. Measured at hit@1 0.925 / MRR 0.940 for the tokeniser split
     (bench/zh/indexing_probe.py), and 0.950 / 0.960 once 哪个/为什么/哪里 stop
     steering the ranking (bench/zh/tuning_probe.py).
+
+    The query side also drops English stopwords and folds English inflections
+    (D-041). Both are no-ops for Han text -- the stoplist holds no Han token and
+    ``stem_term`` refuses non-ASCII -- so the Chinese number above is unchanged.
 
     Without jieba: bigrams on both sides. Worse, but working -- which is the
     whole reason jieba is an extra and not a dependency. Session folding still
@@ -72,6 +83,16 @@ MAX_CONTENT_CHARS = 100_000
 # for max-only, and the curve is flat from 0.1 to 1.5 -- this is a plateau, not
 # a fitted point (bench/zh/tuning_probe.py).
 SESSION_FOLD_BETA = 0.5
+
+# How much an adjacent pair of English words is worth when the document contains
+# the same pair in the same order. A name like "pottery class" or "mental
+# health" is one thing, and BM25 discards the adjacency. Swept 0.0-0.5 on LoCoMo
+# through the store: hit@1 0.6702 -> 0.6826 and MRR 0.7712 -> 0.7784 at 0.3,
+# with hit@5 flat and hit@10 down one question (0.9556 -> 0.9549, both far above
+# the 0.9484 this benchmark started at). Chinese is unaffected by construction --
+# character bigrams already index adjacency there, and only ASCII word pairs are
+# collected (D-041).
+PHRASE_BONUS = 0.3
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
@@ -310,7 +331,20 @@ class MemoryStore:
         for sid, turns in self._by_session.items():
             self._session_text[sid] = "\n".join(m.content.lower() for m in turns)
 
-        self._index = BM25(k1=self._k1, b=self._b, index_fn=index_fn, query_fn=query_fn, fuzzy=True)
+        self._index = BM25(
+            k1=self._k1,
+            b=self._b,
+            index_fn=index_fn,
+            query_fn=query_fn,
+            fuzzy=True,
+            # English inflections are folded on both sides: a question asking what
+            # Melanie "camped" in has to match a memory saying she went
+            # "camping". Applied here rather than in the stored token column so
+            # an existing database needs no migration -- the persisted tokens
+            # stay verbatim and are folded when the index is built.
+            normalize=stem_term,
+            phrase_bonus=PHRASE_BONUS,
+        )
         self._index.index_tokens(prepared)
         self._data_version = self._db.execute("PRAGMA data_version").fetchone()[0]
         self._dirty = False
