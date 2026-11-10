@@ -184,6 +184,7 @@ def main(argv: list[str] | None = None) -> int:
                     b["_id"]: name_set(b)
                     for b in beliefs
                     if not b.get("superseded_by")
+                    and (b.get("type") or "") in ANSWER_KINDS
                     and any(s in scope for s in (b.get("scope") or []))
                 }
                 wanted = entity_hits(case["query"], visible)
