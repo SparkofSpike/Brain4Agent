@@ -467,14 +467,15 @@ class BM25:
         self._idf = {
             term: math.log(1.0 + (self._n - df + 0.5) / (df + 0.5)) for term, df in self._df.items()
         }
-        # Candidates for the fuzzy path. Built once per index, ASCII letters only,
-        # so a Chinese query never pays for it.
+        # Candidates for the fuzzy path. Built once per index, ASCII letters only
+        # and the same six-letter floor as the query side -- at five, the normal
+        # inflection errors -> error counted as a misspelling and expanded.
         self._fuzzy_vocab: dict[str, int] = {}
         if self.fuzzy:
             self._fuzzy_vocab = {
                 term: df
                 for term, df in self._df.items()
-                if len(term) >= 5 and term.isascii() and term.isalpha()
+                if len(term) >= 6 and term.isascii() and term.isalpha()
             }
 
     def _expand(self, terms: list[str]) -> list[str]:
@@ -501,7 +502,7 @@ class BM25:
                     continue
                 if _within_one_edit(term, candidate) and df > best_df:
                     best, best_df = candidate, df
-            if best is not None:
+            if best is not None and best not in out:
                 out.append(best)
         return out
 
