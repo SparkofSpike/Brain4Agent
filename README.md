@@ -2,6 +2,10 @@
 
 **English** | [简体中文](README.zh-CN.md) | [日本語](README.ja.md) | [한국어](README.ko.md)
 
+> **Agents: start here.** [FOR_AGENTS.md](FOR_AGENTS.md) is this page written
+> for you — what the store does for an agent, how to install it, how to call
+> it, and where it stops being useful.
+
 Long-term memory for agents. CJK-first retrieval, no model in the core path,
 and evidence instead of confidence scores.
 
