@@ -11,7 +11,9 @@ check whether the memory comes back. No labels are stored in the repository and
 no real memory text is printed.
 
 Run it on a copy, not the live store: `MemoryStore.search` increments access
-counters, so even a read writes.
+counters, so even a read writes. Use `snapshot()` to make that copy -- a plain
+file copy loses whatever is still in the write-ahead log, which on the store
+this was measured against was 13 of 2910 memories.
 
     python -m bench.real.probe --db /path/to/copy.db --limit 300
 """
@@ -22,12 +24,39 @@ import argparse
 import json
 import random
 import re
+import sqlite3
 import sys
 from collections import defaultdict
 from pathlib import Path
 
 from brain4agent import MemoryStore
 from brain4agent.tokenize import load_jieba
+
+
+def snapshot(src: Path, dst: Path) -> Path:
+    """Copy a store with SQLite's backup API instead of the filesystem.
+
+    `shutil.copy2` on a WAL-mode database copies the main file and drops the
+    `-wal`, which is not a partial-file problem: the committed rows that have not
+    been checkpointed simply are not there. Measured on the store these numbers
+    come from -- 2910 rows direct, 2897 through a file copy, a 0.4% loss that is
+    invisible except as a count nobody reconciles.
+
+    The backup API reads through the log and writes one consistent file. The
+    source is opened read-only so this cannot write to a live store.
+    """
+    uri = f"file:{src.as_posix()}?mode=ro"
+    source = sqlite3.connect(uri, uri=True)
+    try:
+        target = sqlite3.connect(dst)
+        try:
+            source.backup(target)
+        finally:
+            target.close()
+    finally:
+        source.close()
+    return dst
+
 
 _ASCII_ID = re.compile(r"[A-Za-z][A-Za-z0-9_.-]{2,}")
 _KEEP_POS = frozenset({"n", "nr", "ns", "nt", "nz", "vn", "an", "eng"})
