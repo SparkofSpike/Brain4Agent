@@ -21,7 +21,7 @@ from brain4agent.judge import Judge, JudgeError
 from brain4agent.store import Memory, MemoryStore
 from brain4agent.tokenize import BM25, tokenize, word_tokens
 
-__version__ = "0.0.3"
+__version__ = "0.1.0"
 
 __all__ = [
     "BM25",

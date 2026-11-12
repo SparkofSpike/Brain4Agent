@@ -6,6 +6,11 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-12
+
+First minor release. Six decision-log entries ship here (D-037 to D-042), all
+retrieval, all measured, and three of them move a published benchmark.
+
 ### Added
 
 - `SearchResult.term_frequencies` reports how many sessions each query term
@@ -23,7 +28,6 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `b4a_remember` writes `date:`, `kind:` and `project:` tags automatically.
   `project` comes from the argument or `BRAIN4AGENT_PROJECT`. The library's
   `add()` is unchanged; only the MCP tool adds the labels (D-040).
-
 - Chinese retrieval: hit@1 0.9250 → 0.9500, hit@5 0.9750 → 1.0000, MRR
   0.9404 → 0.9613. Question words (哪个/为什么/哪里/什么) are dropped from the
   query side, and a session is scored from its best three turns instead of its
@@ -43,13 +47,13 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   when a memory contains them adjacent (`pottery class`). PrecisionMemBench total
   72/77 → 74/77. Chinese and LongMemEval are unchanged (D-041).
 - LoCoMo: hit@1 0.6826 → 0.7054, hit@5 0.9020 → 0.9086, MRR 0.7784 → 0.7921,
-hit@10 unchanged. A session is rewarded for keeping the question's words in one
-passage — the fraction of distinct query terms that share a 40-token window,
-multiplied into the score. Only ASCII words take part, documents shorter than
-three windows and queries shorter than five terms are skipped; each guard exists
-because its absence regressed a different benchmark. Chinese, PrecisionMemBench,
-LongMemEval and keyword queries against the real store were all measured
-unchanged (D-042).
+  hit@10 unchanged. A session is rewarded for keeping the question's words in
+  one passage — the fraction of distinct query terms that share a 40-token
+  window, multiplied into the score. Only ASCII words take part, documents
+  shorter than three windows and queries shorter than five terms are skipped;
+  each guard exists because its absence regressed a different benchmark.
+  Chinese, PrecisionMemBench, LongMemEval and keyword queries against the real
+  store were all measured unchanged (D-042).
 
 ### Fixed
 
