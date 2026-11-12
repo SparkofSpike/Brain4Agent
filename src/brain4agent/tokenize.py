@@ -28,7 +28,7 @@ import math
 import re
 import unicodedata
 from collections import Counter
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 
 # Scripts that are written without spaces between words, and therefore need
 # character bigrams rather than whitespace splitting. The list is longer than
@@ -569,6 +569,59 @@ def _phrasable(term: str) -> bool:
     return len(term) >= 2 and term.isascii() and term.isalpha()
 
 
+def window_proximity(
+    terms: Sequence[str],
+    tokens: Sequence[str],
+    window: int = 40,
+) -> float:
+    """Fraction of distinct query terms that share one window-token span.
+
+    The difference from coverage is *where*, not *whether*. A long conversation
+    that mentions Caroline in every turn and a conversation actually about
+    Caroline's conference have identical coverage and different answers; only
+    the second keeps the question's nouns in one passage. Measured on LoCoMo:
+    full-document coverage is flat or worse (D-041), this is worth +0.023 hit@1
+    (D-042).
+
+    Callers pass only ASCII words. A fixed window does not transfer between
+    scripts -- a Chinese session indexes roughly two tokens per character, so 40
+    tokens is a third of the document and the signal degrades into full-document
+    coverage -- and it does not need to: Chinese already indexes every adjacent
+    character pair as a bigram, so adjacency is in the index rather than in a
+    bonus. Same scope rule as the phrase index (D-041), and measured on the
+    Chinese benchmark (D-042).
+
+    Sliding window over occurrence positions, O(occurrences). The naive version
+    -- every left edge against every occurrence of every term -- took minutes
+    over 1540 questions and bought nothing extra.
+
+    Returns 0.0 when no term occurs at all, so a document that matched only
+    through the fuzzy path is neither rewarded nor penalised.
+    """
+    want = list(dict.fromkeys(terms))
+    if not want or window < 1:
+        return 0.0
+    wanted = set(want)
+    counts: dict[str, int] = {}
+    best = 0
+    left = 0
+    # Positions only, not (index, term) tuples: the term is recoverable from
+    # the token, and a list of ints is four times smaller at this corpus size.
+    positions = [i for i, t in enumerate(tokens) if t in wanted]
+    for pos in positions:
+        term = tokens[pos]
+        counts[term] = counts.get(term, 0) + 1
+        while pos - positions[left] >= window:
+            old = tokens[positions[left]]
+            counts[old] -= 1
+            if not counts[old]:
+                del counts[old]
+            left += 1
+        if len(counts) > best:
+            best = len(counts)
+    return best / len(want)
+
+
 class BM25:
     """Okapi BM25 over a fixed corpus.
 
@@ -607,6 +660,10 @@ class BM25:
         fuzzy: bool = False,
         normalize: Callable[[str], str] | None = None,
         phrase_bonus: float = 0.0,
+        proximity_bonus: float = 0.0,
+        proximity_window: int = 40,
+        proximity_min_terms: int = 5,
+        proximity_min_doc_tokens: int = 0,
     ) -> None:
         self.k1 = k1
         self.b = b
@@ -615,6 +672,13 @@ class BM25:
         self.fuzzy = fuzzy
         self.normalize = normalize or (lambda term: term)
         self.phrase_bonus = phrase_bonus
+        self.proximity_bonus = proximity_bonus
+        self.proximity_window = proximity_window
+        self.proximity_min_terms = proximity_min_terms
+        # 0 means "three windows", which is the shipped rule. It is a parameter
+        # rather than a literal so the guard can be switched off in a measurement
+        # -- the cost of the floor is a number, and a number needs a knob.
+        self.proximity_min_doc_tokens = proximity_min_doc_tokens
         self._ids: list[str] = []
         self._docs: list[Counter[str]] = []
         self._lens: list[int] = []
@@ -636,6 +700,17 @@ class BM25:
         # once indexing finishes. Recomputing it per (query, document, term) was
         # three logarithms per pair.
         self._idf: dict[str, float] = {}
+        # Token sequences, kept only when the proximity path is on. Positions are
+        # what the phrase index cannot give: proximity asks about the distance
+        # between terms that are not adjacent. A list of the existing normalised
+        # strings, not a copy -- the sequence would otherwise be built and thrown
+        # away, and a dict of term -> positions costs more memory than it saves
+        # at this corpus size.
+        #
+        # Empty when the bonus is off at index time; `search` checks the length
+        # against `_n` before using it, so turning the bonus on afterwards
+        # degrades to plain BM25 instead of raising.
+        self._seqs: list[list[str]] = []
 
     def __len__(self) -> int:
         return self._n
@@ -663,11 +738,14 @@ class BM25:
         self._df = Counter()
         self._postings = {}
         self._pair_postings = {}
+        self._seqs = []
 
         for idx, (_, toks) in enumerate(items):
             seq = [self.normalize(t) for t in toks]
             counts = Counter(seq)
             self._docs.append(counts)
+            if self.proximity_bonus > 0.0:
+                self._seqs.append(seq)
             self._lens.append(sum(counts.values()))
             for term, tf in counts.items():
                 self._df[term] += 1
@@ -738,6 +816,23 @@ class BM25:
             for a, b in zip(q_terms, q_terms[1:], strict=False)
             if self.phrase_bonus > 0.0 and _phrasable(a) and _phrasable(b)
         ]
+        # Proximity is a property of the question as asked. A fuzzy correction is
+        # a guess about a word the corpus never contained, and letting it into the
+        # window would reward a document for containing the guess.
+        #
+        # ASCII words only, the same scope the phrase index uses (D-041) and for
+        # the same structural reason: Chinese indexes character bigrams, so a
+        # term hit there already means two adjacent characters, and a Chinese
+        # query expands to 7-11 terms whose co-occurrence measures tokeniser
+        # agreement rather than topic concentration. Measured on the Chinese
+        # benchmark (D-042): the bonus is flat at hit@1 and costs one question at
+        # hit@5, with every candidate scoring the same proximity -- it separates
+        # nothing there while perturbing the fold.
+        q_distinct = (
+            [t for t in dict.fromkeys(q_terms) if _phrasable(t)]
+            if self.proximity_bonus > 0.0
+            else []
+        )
         if self.fuzzy:
             q_terms = self._expand(q_terms)
         if not q_terms:
@@ -763,7 +858,7 @@ class BM25:
             weight = self._idf.get(a, 0.0) + self._idf.get(b, 0.0)
             for idx in postings:
                 pair_bonus_by_doc[idx] = pair_bonus_by_doc.get(idx, 0.0) + weight
-        scores: list[tuple[str, float]] = []
+        ranked: list[tuple[int, float]] = []
         for idx in candidates:
             counts = self._docs[idx]
             dl = self._lens[idx]
@@ -777,7 +872,62 @@ class BM25:
             if pair_bonus_by_doc:
                 score += self.phrase_bonus * pair_bonus_by_doc.get(idx, 0.0)
             if score > 0.0:
-                scores.append((self._ids[idx], score))
+                ranked.append((idx, score))
 
-        scores.sort(key=lambda kv: (-kv[1], self._order.get(kv[0], 0)))
-        return scores[:top_k]
+        if self.proximity_bonus > 0.0 and len(q_distinct) >= self.proximity_min_terms:
+            # The sequence cache is built only when the bonus was on at *index*
+            # time. Raising it afterwards is a caller error, and an IndexError
+            # mid-query would be a worse answer than falling back to plain BM25.
+            if len(self._seqs) == self._n:
+                ranked = self._apply_proximity(ranked, q_distinct, top_k)
+            else:
+                ranked.sort(key=lambda kv: (-kv[1], self._order.get(self._ids[kv[0]], 0)))
+        else:
+            ranked.sort(key=lambda kv: (-kv[1], self._order.get(self._ids[kv[0]], 0)))
+
+        return [(self._ids[idx], score) for idx, score in ranked[:top_k]]
+
+    def _apply_proximity(
+        self,
+        ranked: list[tuple[int, float]],
+        q_distinct: list[str],
+        top_k: int,
+    ) -> list[tuple[int, float]]:
+        """Scale each candidate's score by how concentrated the query is in it.
+
+        **A document shorter than three windows is skipped.** There is no
+        "passage" in a one-sentence belief, so the signal degenerates into
+        document coverage -- which D-041 measured as flat or worse -- while
+        keeping a multiplicative weight large enough to outvote BM25 outright.
+        Measured on PrecisionMemBench (D-042): without this guard the bonus puts
+        a scope-bleed belief into `negative-guidance-mongoose` and the benchmark
+        drops 74/77 -> 73/77. With it, every PMB belief is below the floor and
+        the benchmark is untouched.
+
+        No pruning. Two bounds were written for this loop -- a per-document
+        bound from the terms the document contains at all, and a ceiling bound
+        from the maximum possible boost -- and `bench.locomo.pruning_effect_probe`
+        measured both as ineffective at the shipped alpha: 271.6 proximity calls
+        per query out of 272 candidates, in both the filtered and unfiltered call
+        shapes. The ceiling is 2.5x, so no realistic gap between neighbouring
+        scores ever clears it, and LoCoMo's sessions carry most of a question's
+        terms, so `present / n_terms` is near 1 as well. Sixty lines of bound
+        arithmetic that never fires, and that produced two wrong-answer bugs
+        while being written, is a worse trade than 8 ms.
+
+        Ordering keys: boosted score, then index insertion order. The same rule
+        the index uses, and for the same reason: ties must not depend on
+        identifier.
+        """
+        alpha = self.proximity_bonus
+        floor = self.proximity_min_doc_tokens or self.proximity_window * 3
+        order = self._order
+        out: list[tuple[int, float]] = []
+        for idx, score in ranked:
+            if self._lens[idx] >= floor:
+                prox = window_proximity(q_distinct, self._seqs[idx], self.proximity_window)
+                out.append((idx, score * (1.0 + alpha * prox)))
+            else:
+                out.append((idx, score))
+        out.sort(key=lambda kv: (-kv[1], order.get(self._ids[kv[0]], 0)))
+        return out[:top_k]

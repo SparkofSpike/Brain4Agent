@@ -94,6 +94,50 @@ SESSION_FOLD_BETA = 0.5
 # collected (D-041).
 PHRASE_BONUS = 0.3
 
+# How much a query's terms clustering in one passage is worth. Multiplicative:
+# a document gains at most this factor, so 0.0 is exactly the pre-D-042 score.
+# The signal is the fraction of distinct query terms sharing a window of
+# PROXIMITY_WINDOW tokens -- where the words are, not whether the session
+# contains them. Full-document coverage was flat or worse on this benchmark
+# (D-041); local coverage is not (D-042). Shipped: LoCoMo hit@1 0.6826 -> 0.7054,
+# hit@5 0.9020 -> 0.9086, MRR 0.7784 -> 0.7921, hit@10 unchanged. The 5x6 grid
+# behind the constant is in bench/locomo/proximity_sweep.py: every cell scored
+# above the baseline, and the plateau runs from window 30 to 60 at alpha 1 to 3.
+# That grid re-ranked a top-10 window per query and had no five-term floor, so it
+# reports 0.7080 -- an undercount. Through the store, which re-ranks all 272
+# candidates, the same alpha scores 0.7100; with the term floor on (what ships)
+# it is 0.7054. So the floor costs 0.0046, not the 0.0026 the grid implied. Both
+# rows are in bench/locomo/floor_attribution_probe.py.
+PROXIMITY_BONUS = 1.5
+
+# Index tokens, not characters. 40 is roughly one long LoCoMo turn, which is the
+# passage a question about a single event names, and it sits inside a 12-cell
+# plateau (window 30-60, alpha 1-3) whose whole span is 0.0058 hit@1 while every
+# cell in it beats the baseline by at least 0.0196. So the value inside that
+# block is a rounding decision, not a fitted peak -- the same argument D-037
+# makes for SESSION_FOLD_BETA. The same constant is the unit of the length floor
+# in BM25._apply_proximity: shorter documents have no passage to measure. Chinese
+# never reaches it -- only ASCII words take part.
+PROXIMITY_WINDOW = 40
+
+# Distinct ASCII query terms a question needs before the signal is trusted. Two
+# to four words is a keyword lookup, not a question: on a full snapshot of the
+# real store the bonus cost hit@1 0.4867 -> 0.4067 across 2-, 3- and 4-word
+# buckets, and the largest real-store query has four terms while LoCoMo's median
+# question has five. 5 is the boundary where no real-store query qualifies and
+# 64.7% of LoCoMo's do (bench/term_count_probe.py, D-042). With the floor the
+# shipped configuration matches "proximity off" in every column on that store.
+PROXIMITY_MIN_TERMS = 5
+
+# The length floor, in index tokens. 0 means "three windows", which is the rule
+# that ships: a document with no passage to speak of gets no bonus. Measured by
+# switching it off (bench/guard_attribution_probe.py): PrecisionMemBench drops
+# 74/77 -> 73/77, because a one-sentence belief then earns a multiplier large
+# enough to outvote BM25 (D-042). Here as a knob rather than a literal so that
+# cost stays measurable.
+PROXIMITY_MIN_DOC_TOKENS = 0
+
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS memories (
     id          TEXT PRIMARY KEY,
@@ -344,6 +388,10 @@ class MemoryStore:
             # stay verbatim and are folded when the index is built.
             normalize=stem_term,
             phrase_bonus=PHRASE_BONUS,
+            proximity_bonus=PROXIMITY_BONUS,
+            proximity_window=PROXIMITY_WINDOW,
+            proximity_min_terms=PROXIMITY_MIN_TERMS,
+            proximity_min_doc_tokens=PROXIMITY_MIN_DOC_TOKENS,
         )
         self._index.index_tokens(prepared)
         self._data_version = self._db.execute("PRAGMA data_version").fetchone()[0]

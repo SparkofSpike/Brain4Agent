@@ -84,6 +84,12 @@ class Evidence:
     """
 
     memory: _MemoryLike
+    # A ranking score, not a comparable quantity. It is BM25's own score scaled by
+    # the phrase and proximity bonuses, so it can be up to (1 + PROXIMITY_BONUS)
+    # times the raw BM25 value and its magnitude depends on the query's shape --
+    # a keyword lookup gets no proximity factor at all (D-042). Useful for
+    # ordering and for `coverage`-style ratios within one result; meaningless as
+    # an absolute threshold or as a comparison across queries. D-008 is why.
     score: float
     coverage: float
     missing_terms: list[str] = field(default_factory=list)
