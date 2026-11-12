@@ -1,4 +1,10 @@
-
+# Every text file is stored as LF in the repository, whatever the platform's git
+# configuration happens to say. Relying on `core.autocrlf` works only for people
+# who have it set: a contributor without it commits CRLF, and from then on every
+# diff of that file is a whole-file rewrite. Stated here so the guarantee lives in
+# the repository instead of in one machine's config. `text=auto` still leaves
+# binary files alone.
+* text=auto eol=lf
 
 # License texts are reproduced byte for byte. Git's line-ending conversion would
 # change Apache-2.0 from 11358 bytes to 11560 and make it stop matching the
