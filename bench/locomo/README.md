@@ -8,26 +8,26 @@ model in the loop, and the number published whatever it says.
 ```
 answerable: 1531 of 1540 questions
 
-hit@1   0.6826
-hit@5   0.9020
+hit@1   0.7054
+hit@5   0.9086
 hit@10  0.9549
-mrr     0.7784
+mrr     0.7921
 ```
 
 By category (hit@1):
 
 ```
-open-domain   0.7586
-temporal      0.6656
-single-hop    0.5552
-multi-hop     0.4270
+open-domain   0.7919
+temporal      0.6906
+single-hop    0.5445
+multi-hop     0.4494
 ```
 
 **These are retrieval numbers, not answer accuracy.** Published LoCoMo scores
 (0.67–0.92) measure whether a generated answer matches the gold answer under an
-LLM judge. A retrieval number can only bound that: with `hit@5 = 0.9020`, the
+LLM judge. A retrieval number can only bound that: with `hit@5 = 0.9086`, the
 best possible answer accuracy **for a reader that sees exactly five sessions and
-cannot reason across them** is 90.2%.
+cannot reason across them** is 90.9%.
 
 That condition matters and this file originally omitted it. Allow ten sessions
 and the bound is this store's own `hit@10 = 0.9549`; allow a reader to reason
@@ -36,7 +36,7 @@ single-retrieval bound at all. It is a statement about one configuration, not
 about the field, and it is not evidence that any other system's retrieval is
 worse.
 
-Anyone comparing 0.6826 against Mem0's 0.669 or Letta's 0.740 is comparing two
+Anyone comparing 0.7054 against Mem0's 0.669 or Letta's 0.740 is comparing two
 different measurements. The README says so here so that nobody has to discover it
 later.
 
@@ -89,6 +89,13 @@ effect because every document was the same size.
 coverage re-weighting is flat or worse (0.6688-0.6702 against 0.6702), BM25L's
 length compensation adds 0.0013 hit@1 at best. Both stay out of the product.
 
+D-042 then showed what the difference is, and it is not a matter of weight. Full
+coverage asks *whether* the words are in the session, which BM25 already knows.
+Proximity asks *where* — the fraction of distinct query terms sharing one 40-token
+window — and that scored 0.6950-0.7080 across a 5x6 grid, every cell above the
+baseline. The distinction is not "coverage again, tuned better": it is a fact the
+index discards, recovered rather than reweighted.
+
 ## Query-side folding
 
 The largest single gain on this benchmark is not in the scorer (D-041). English
@@ -98,11 +105,14 @@ the question did not use:
 ```
 hit@1 0.6310 -> 0.6702   drop English stopwords, fold inflections on both sides
 hit@1 0.6702 -> 0.6826   reward adjacent query words (phrase bonus 0.3)
+hit@1 0.6826 -> 0.7054   reward terms that share a passage (proximity 1.5, D-042)
 ```
 
 The first row costs nothing extra to query; the second builds a pair index, which
-roughly doubles rebuild time. `python -m bench.locomo.tuning_probe` reproduces
-every row, one variant at a time, including the sweep that picked 0.3.
+roughly doubles rebuild time; the third keeps the token sequences, which costs
+query time on long documents only. `python -m bench.locomo.tuning_probe`
+reproduces the first two, one variant at a time, including the sweep that picked
+0.3; `python -m bench.locomo.proximity_sweep` does the same for the third.
 
 ## Sample isolation
 
@@ -119,7 +129,7 @@ the D-025 scope mechanism doing a real job rather than serving a leaderboard.
 - **It says nothing about PrecisionMemBench-style precision.** There, a single
   extra result fails a case; here, top-5 is fine. Same store, opposite tuning.
 - **It says nothing about answer quality.** No generator ran.
-- **0.6826 is not a state-of-the-art claim.** It is a baseline with no model, on
+- **0.7054 is not a state-of-the-art claim.** It is a baseline with no model, on
   a benchmark where most published systems spend tokens on every step.
 
 ## Data provenance
@@ -148,8 +158,8 @@ question for reasons having nothing to do with retrieval.
 a transport or rate-limit failure surfacing as `None`, which means an accuracy
 number from this path would measure API reliability as much as memory quality.
 
-Both are fixable. Neither is fixed, so no number is published. `hit@5 = 0.9020`
-remains the honest bound: retrieval finds the answer's session 90.2% of the time,
+Both are fixable. Neither is fixed, so no number is published. `hit@5 = 0.9086`
+remains the honest bound: retrieval finds the answer's session 90.9% of the time,
 and what a reader does with it is unmeasured.
 
 Running this properly would need session dates in the evidence block,
