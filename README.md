@@ -237,6 +237,26 @@ runs at index time, not in the stored token column, so an existing database
 needs no migration. Chinese is untouched by all three — its bigrams already
 index adjacency, and the rules refuse non-ASCII terms.
 
+### Where the words sit
+
+BM25 counts occurrences. It cannot tell a session that is *about* an event from
+one that mentions the same words in passing. On LoCoMo's 486 misses, 417 had the
+right session inside the top ten and **188 had it at rank 2**, usually within a
+few percent of the winner (D-042).
+
+So a document also earns a bonus for keeping the question's words together: the
+fraction of distinct query terms that share a window of 40 index tokens,
+multiplied into the score. It is not coverage reweighted — coverage asks
+*whether* a session has the words, and four separate attempts to use it as a
+post-hoc term were flat or worse (D-020, D-024, D-039, D-041). This asks
+*where* they are, which is a fact the index throws away.
+
+Three guards, each from a measurement that regressed without it: only ASCII
+words take part (Chinese bigrams already index adjacency), documents under
+three windows are skipped (a one-sentence belief has no passage), and queries
+under five terms are skipped (two to four words is a lookup — on a real store
+the bonus cost 0.043 hit@1 there and nothing anywhere else, D-042).
+
 ### Evidence, not verdicts
 
 - **`corpus_missing`** — a content word from the question appears nowhere in the
@@ -281,7 +301,7 @@ Across three benchmarks:
 | LongMemEval `s` | hit@10 | 0.9660 | — |
 | PrecisionMemBench | active | **42/43** | 18/43 (open-knowledge-format) |
 | PrecisionMemBench | total | **74/77** | 36/77 (open-knowledge-format) |
-| LoCoMo | hit@1 | **0.6826** | not comparable |
+| LoCoMo | hit@1 | **0.7054** | not comparable |
 
 ### PrecisionMemBench — retrieval precision
 
@@ -335,10 +355,10 @@ implementation scores 43/43 and 77/77.
 1540 questions over 272 sessions, 5882 turns.
 
 ```
-hit@1   0.6826
-hit@5   0.9020
+hit@1   0.7054
+hit@5   0.9086
 hit@10  0.9549
-MRR     0.7784
+MRR     0.7921
 ```
 
 `python -m bench.locomo.run` — no model, data committed. These are session
@@ -346,7 +366,13 @@ retrieval rates, not answer accuracy under an LLM judge, so they are not
 comparable to published LoCoMo numbers.
 
 Indexing turns instead of sessions costs 2.5 points of hit@1 (0.6022 → 0.6310),
-same tokenisers and scoring — measured before D-041 raised both.
+same tokenisers and scoring — measured before D-041 and D-042 raised both.
+
+By category (hit@1): open-domain 0.7919, temporal 0.6906, single-hop 0.5445,
+multi-hop 0.4494. The last two are lookups of a single fact inside a session,
+which is why the proximity bonus in [D-042](docs/decisions.md#d-042-proximity-where-the-query-words-sit-not-just-whether-they-appear)
+turns itself off for short queries: it helps a question that names an event and
+hurts one that names a fact.
 
 ### Chinese benchmark
 
@@ -437,17 +463,21 @@ session's best three turns into one score, and matches an unknown English word
 one edit away from a corpus word (D-037, D-038). English queries also drop
 stopwords, fold inflections, and reward word adjacency (D-041) — LoCoMo hit@1
 0.6310 → 0.6826 and PrecisionMemBench total 72/77 → 74/77, with the Chinese
-number unchanged.
+number unchanged. A session is also rewarded for keeping the question's words
+in one passage (D-042) — LoCoMo hit@1 0.6826 → 0.7054 and MRR 0.7784 → 0.7921,
+with the Chinese benchmark, PrecisionMemBench, LongMemEval and keyword queries
+against the real store all measured unchanged.
 
 **Not built:** cross-session synthesis, multimodal, schema on `kind`,
 multi-retriever fusion, a recall scheduler, time-decayed forgetting.
 
 **Measured and rejected:** query-time graph traversal (D-024), write-time
 extraction (D-023), chunking LoCoMo sessions for retrieval, running LongMemEval
-on the store's own tokenisers (D-037), chunking LoCoMo sessions (D-037).
+on the store's own tokenisers (D-037), chunking LoCoMo sessions (D-037),
+minimum-span and early-position re-ranks (D-042).
 
 Release history is in [CHANGELOG.md](CHANGELOG.md). The
-[decision log](docs/decisions.md) records 40 entries; the
+[decision log](docs/decisions.md) records 42 entries; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the field.
 
@@ -463,7 +493,7 @@ python -m bench.locomo.run
 ```
 
 `bench/zh/e2e.py` should report `hit@1 0.9500`; `bench.pmb.run` `pass 74/77`;
-`bench.locomo.run` `hit@1 0.6826`. Lower is a regression. The last two need no
+`bench.locomo.run` `hit@1 0.7054`. Lower is a regression. The last two need no
 API key and no network. Changes to a design decision belong in
 `docs/decisions.md` as a new entry, with the measurement that justifies it.
 

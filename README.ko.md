@@ -256,8 +256,8 @@ MRR      0.8990
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
 | PrecisionMemBench | active | **42/43** | 18/43 (open-knowledge-format) |
-| PrecisionMemBench | total | **72/77** | 36/77 (open-knowledge-format) |
-| LoCoMo | hit@1 | **0.6310** | 비교 불가 |
+| PrecisionMemBench | total | **74/77** | 36/77 (open-knowledge-format) |
+| LoCoMo | hit@1 | **0.7054** | 비교 불가 |
 
 ### PrecisionMemBench — 검색 정밀도
 
@@ -267,7 +267,7 @@ MRR      0.8990
 
 ```
 active  42/43 = 0.9767     질의 의존 검색이 필요한 케이스
- total  72/77 = 0.9351     어떤 저장소든 통과하는 케이스 포함
+ total  74/77 = 0.9610     어떤 저장소든 통과하는 케이스 포함
 ```
 
 결과 집합 크기를 여덟 단어 미만에서 `top_k=1`로 고정하던 규칙을 없애고, 질의에
@@ -282,7 +282,7 @@ active  42/43 = 0.9767     질의 의존 검색이 필요한 케이스
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              42/43     72/77
+this store              42/43     74/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -303,10 +303,10 @@ a-mem                    0/43      7/77
 272개 세션, 5882턴에 대한 질문 1540개.
 
 ```
-hit@1   0.6310
-hit@5   0.8870
-hit@10  0.9484
-MRR     0.7402
+hit@1   0.7054
+hit@5   0.9086
+hit@10  0.9549
+MRR     0.7921
 ```
 
 `python -m bench.locomo.run`——모델 없음, 데이터는 커밋됨. 이는 세션 검색
@@ -411,7 +411,7 @@ LoCoMo 세션 청킹(D-037), LongMemEval을 스토어 자체 토크나이저로 
 (D-037).
 
 릴리스 이력은 [CHANGELOG.md](CHANGELOG.md)에 있다.
-[결정 로그](docs/decisions.md)는 40개 항목을 기록한다.
+[결정 로그](docs/decisions.md)는 42개 항목을 기록한다.
 [연구 노트](docs/research.md)와 [지형 분석](docs/landscape.md)은 주변 분야를
 다룬다.
 
@@ -426,7 +426,7 @@ python -m bench.pmb.run
 python -m bench.locomo.run
 ```
 
-`bench/zh/e2e.py`는 `hit@1 0.9500`, `bench.pmb.run`은 `pass 72/77`,
+`bench/zh/e2e.py`는 `hit@1 0.9500`, `bench.pmb.run`은 `pass 74/77`,
 `bench.locomo.run`은 `hit@1 0.6310`을 보고해야 한다. 낮아지면 회귀다. 마지막
 둘은 API 키도 네트워크도 필요 없다. 설계 결정을 바꾸려면 근거가 되는 측정과
 함께 `docs/decisions.md`에 새 항목을 추가할 것.

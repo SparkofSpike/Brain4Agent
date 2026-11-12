@@ -42,8 +42,25 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`camped` matches `camping`), and two adjacent query words earn a small bonus
   when a memory contains them adjacent (`pottery class`). PrecisionMemBench total
   72/77 → 74/77. Chinese and LongMemEval are unchanged (D-041).
+- LoCoMo: hit@1 0.6826 → 0.7054, hit@5 0.9020 → 0.9086, MRR 0.7784 → 0.7921,
+hit@10 unchanged. A session is rewarded for keeping the question's words in one
+passage — the fraction of distinct query terms that share a 40-token window,
+multiplied into the score. Only ASCII words take part, documents shorter than
+three windows and queries shorter than five terms are skipped; each guard exists
+because its absence regressed a different benchmark. Chinese, PrecisionMemBench,
+LongMemEval and keyword queries against the real store were all measured
+unchanged (D-042).
 
 ### Fixed
+
+- The proximity re-rank was first written with two pruning bounds. Both were
+  wrong in ways that returned fewer results than asked for — `>` where `>=` was
+  needed never assigned the frontier and skipped every document after the first;
+  `<=` where `<` was needed dropped documents that tie the k-th place. Fixing them
+  was not enough: instrumenting `window_proximity` showed 271.6 calls per query
+  out of 272 candidates, in both call shapes, so neither bound ever fired at the
+  shipped alpha. The bounds are removed rather than kept as dead code — sixty
+  lines that never fire and had already produced two wrong answers.
 
 - `supersede(old, new)` redirects hits to the current memory instead of
   returning nothing when the replacement uses different wording (D-027).

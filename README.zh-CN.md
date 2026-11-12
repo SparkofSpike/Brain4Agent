@@ -251,8 +251,8 @@ MRR      0.8990
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
 | PrecisionMemBench | active | **42/43** | 18/43（open-knowledge-format） |
-| PrecisionMemBench | total | **72/77** | 36/77（open-knowledge-format） |
-| LoCoMo | hit@1 | **0.6310** | 不可比 |
+| PrecisionMemBench | total | **74/77** | 36/77（open-knowledge-format） |
+| LoCoMo | hit@1 | **0.7054** | 不可比 |
 
 ### PrecisionMemBench — 检索精度
 
@@ -262,7 +262,7 @@ MRR      0.8990
 
 ```
 active  42/43 = 0.9767     需要查询相关检索的用例
- total  72/77 = 0.9351     包含任何存储都能过的用例
+ total  74/77 = 0.9610     包含任何存储都能过的用例
 ```
 
 这里提升了两处：结果集大小改为按查询中出现的名称数量决定，不再对八个词以下的
@@ -277,7 +277,7 @@ active  42/43 = 0.9767     需要查询相关检索的用例
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              42/43     72/77
+this store              42/43     74/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -298,10 +298,10 @@ a-mem                    0/43      7/77
 1540 个问题，272 个会话，5882 轮。
 
 ```
-hit@1   0.6310
-hit@5   0.8870
-hit@10  0.9484
-MRR     0.7402
+hit@1   0.7054
+hit@5   0.9086
+hit@10  0.9549
+MRR     0.7921
 ```
 
 `python -m bench.locomo.run`——不涉及模型，数据已提交。
@@ -310,6 +310,11 @@ MRR     0.7402
 
 索引单轮而不是会话，会损失 2.5 个点的 hit@1（0.6022 → 0.6310），分词器和
 评分不变。
+
+按类别（hit@1）：open-domain 0.7919，temporal 0.6906，single-hop 0.5445，
+multi-hop 0.4494。后两类是在单个会话内找一个事实，这也是
+[D-042](docs/decisions.md#d-042-proximity-where-the-query-words-sit-not-just-whether-they-appear)
+的近邻加权对短查询自动关闭的原因：它帮一个点名事件的问题，伤一个点名事实的问题。
 
 ### 中文基准
 
@@ -402,7 +407,7 @@ hit@10 已经饱和；只有 hit@1 和 MRR 有区分度。
 切块检索（D-037）、用 store 自己的分词器跑 LongMemEval（D-037）。
 
 发布历史见 [CHANGELOG.md](CHANGELOG.md)。[决策日志](docs/decisions.md)记录了
-40 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
+42 条；[研究笔记](docs/research.md)和[版图分析](docs/landscape.md)覆盖周边领域。
 
 ## 参与贡献
 
@@ -415,8 +420,8 @@ python -m bench.pmb.run
 python -m bench.locomo.run
 ```
 
-`bench/zh/e2e.py` 应报告 `hit@1 0.9500`；`bench.pmb.run` 应报告 `pass 72/77`；
-`bench.locomo.run` 应报告 `hit@1 0.6310`。低于这些就是回归。后两个不需要
+`bench/zh/e2e.py` 应报告 `hit@1 0.9500`；`bench.pmb.run` 应报告 `pass 74/77`；
+`bench.locomo.run` 应报告 `hit@1 0.7054`。低于这些就是回归。后两个不需要
 API key，也不需要网络。改动某条设计决策，应该在 `docs/decisions.md` 里
 新增一条，附上支撑它的测量。
 

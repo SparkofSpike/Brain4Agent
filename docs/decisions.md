@@ -2359,3 +2359,310 @@ recovers an ordering fact BM25 threw away, not a weighted copy of what it used.
 - Every number above is retrieval, not answer quality. Nothing here changes the
   claim in D-011: the store reports evidence and the caller decides.
 
+## D-042 Proximity: where the query words sit, not just whether they appear
+
+**Date:** 2026-11-11
+**Status:** Shipped. LoCoMo up, everything else measured unchanged.
+
+**Context.** D-041 left LoCoMo at hit@1 0.6826 over 1531 answerable questions,
+the weakest published number. A rank histogram of the misses (`bench/locomo/diagnose.py`)
+narrowed it: 1045 questions already put the gold session first, **188 put it
+second**, 75 third, and only 69 fell outside the top ten. On those second places
+the gold and the winner had nearly the same coverage -- median 0.508 against
+0.533 -- and scores within a few percent:
+
+```
+When did Caroline go to the LGBTQ conference?   gold rank 2
+  session_5  18.65  coverage 0.96   <- returned
+  session_7  18.15  coverage 0.96   <- gold
+```
+
+That is not a missing-word problem. Both sessions contain the question's words.
+It is a *placement* problem: one conversation is about the conference, the other
+mentions the same words in passing, and a bag of words cannot tell them apart.
+
+**What changed.** One signal, `window_proximity` in `tokenize.py`: the fraction
+of distinct query terms that share a window of 40 index tokens. Applied as
+`score * (1 + alpha * proximity)`, so alpha = 0 is exactly the previous score.
+
+The distinction from D-041's rejected coverage re-rank is the whole point. That
+one asked *whether* the words are in the session and multiplied by a function of
+the same BM25 already knows. This one asks *where they are* -- a fact the index
+throws away -- and it is the third time in this project that recovering a
+thrown-away ordering fact worked where reweighting known facts did not (the
+phrase bonus in D-041 was the second, the read/write tokenizer split in D-019
+the first).
+
+**Measured.** `bench/locomo/proximity_sweep.py`, 5x6 grid over window and alpha.
+Each cell re-ranks the store's own top-10 for that query, so the fold and the tag
+filter are in the loop, but the store itself re-ranks all 272 candidates. That
+difference is worth 0.0020, and it matters for how the grid is read -- see the
+attribution note below the table:
+
+| window | a=0.25 | a=0.5 | a=1 | a=1.5 | a=2 | a=3 |
+|---|---|---|---|---|---|---|
+| 20 | 0.6995 | 0.7002 | 0.7041 | 0.7002 | 0.7002 | 0.7022 |
+| 30 | 0.6963 | 0.6995 | 0.7054 | 0.7061 | 0.7061 | 0.7080 |
+| 40 | 0.6950 | 0.6989 | 0.7061 | **0.7080** | 0.7074 | 0.7067 |
+| 60 | 0.6917 | 0.6976 | 0.7022 | 0.7061 | 0.7067 | 0.7061 |
+| 80 | 0.6891 | 0.6969 | 0.6995 | 0.7015 | 0.7008 | 0.7008 |
+
+Baseline 0.6826. **Every cell is above it**, and the weakest by a clear margin.
+
+The block window 30-60 x alpha 1-3 is 12 cells spanning 0.7022 to 0.7080 -- a
+0.0058 band whose floor is still 0.0196 above the baseline. `window=40,
+alpha=1.5` is a point inside that band, tied for the top with `window=30,
+alpha=3`, and the per-alpha spreads inside the block run 0.0013 to 0.0039. So
+the exact value is a rounding decision rather than a fitted peak, which is the
+rule D-037 applied to `SESSION_FOLD_BETA`. An earlier draft of this paragraph
+said "30-60 all within 0.003", which the table does not support -- the alpha=1
+column spans 0.0039.
+
+**Three guards, each from a measurement that failed without it.** The full grid
+above used a fixed window on ASCII words and would have shipped a regression on
+the other two benchmarks if it had stopped there.
+
+1. **Only ASCII words.** A Chinese query has no ASCII content words, so the
+   signal cannot fire and Chinese is unchanged by construction -- the same scope
+   rule, and the same structural reason, as the phrase index in D-041: Chinese
+   indexes character bigrams, so adjacency is already in the index.
+   Measured before the guard: Chinese hit@5 1.0000 -> 0.9750 and MRR
+   0.9613 -> 0.9598. The losing question was `zh013` (`拒答难在哪里？`), where
+   **every** candidate scored proximity 0.50 -- the query reduces to one content
+   word plus a particle -- so the factor separated nothing while perturbing the
+   turn-level fold. Chinese is now 0.9500 / 1.0000 / 1.0000 / 0.9613, unchanged.
+2. **Documents under three windows are skipped.** A one-sentence belief has no
+   passage, so proximity degenerates into document coverage while keeping a
+   multiplier large enough to outvote BM25. Measured before the guard:
+   PrecisionMemBench 74/77 -> 73/77, losing `negative-guidance-mongoose`, where
+   a scope-bleed belief outranked the counter-signal one. With the guard every
+   PMB belief is below the floor and PMB is 74/77, active 42/43, unchanged.
+3. **Queries with fewer than five ASCII terms are skipped.** `bench/real/ab_probe.py`
+   on a full snapshot of the real store (2,910 memories, 300 leave-one-out
+   keyword queries): hit@1 **0.4867 -> 0.4067**, and every bucket fell -- 2-word
+   0.230 -> 0.190, 3-word 0.580 -> 0.490, 4-word 0.650 -> 0.540. Two to four
+   words is a lookup, not a question (D-039); proximity over two words has three
+   possible values and is noise. `bench/term_count_probe.py` shows the boundary
+   is clean: the real store's queries are 0% at five terms, LoCoMo's median is
+   five (64.7% at five or more), PrecisionMemBench's is three.
+
+   The stronger statement is the one that matters: **with the guard the store's
+   retrieval is bit-identical to having the signal off entirely** --
+
+   ```
+   configuration      hit@1    hit@5    MRR      2-word  3-word  4-word
+   proximity off      0.4867   0.6500   0.5584   0.230   0.580   0.650
+   shipped (floor 5)  0.4867   0.6500   0.5584   0.230   0.580   0.650
+   floor off          0.4067   0.6400   0.5035   0.190   0.490   0.540
+   ```
+
+   Every column of the shipped row equals the off row. On a corpus of keyword
+   queries the feature costs nothing, which is what a guard is for.
+
+   **Two of the three guards are now re-measurable, not just described.**
+   `bench.guard_attribution_probe` switches the two constant-backed guards off
+   and reports the benchmark each protects:
+
+   ```
+   guard             benchmark          shipped   guard off
+   length floor      PMB pass             74/77       73/77
+   term floor        LoCoMo hit@1        0.7054      0.7100
+   term floor        real store hit@1    0.4867      0.4067
+   ```
+
+   The third guard is the ASCII filter on the query, which is a code path
+   rather than a constant and so has no switch. Its cost is the measurement
+   in item 1 above; reproducing it means deleting the filter.
+
+   The real-store row has moved twice, both times for reasons worth recording.
+   It first read 0.4433, measured before the ASCII filter existed; then 0.4267,
+   after that filter but on a snapshot missing 13 memories (see the cost section);
+   now 0.4067 on a complete snapshot. Each number was right for the code and data
+   it was taken on, and none of them was right for the code and data that ship.
+   A guard whose cost cannot be re-run is a story, which is why the switch
+   exists. The ASCII filter
+   is a code path rather than a constant and still has no switch; its
+   measurement above is the record.
+
+**Shipped numbers.**
+
+| benchmark | metric | before | after | |
+|---|---|---|---|---|
+| LoCoMo | hit@1 | 0.6826 | **0.7054** | +0.0228 |
+| LoCoMo | hit@5 | 0.9020 | **0.9086** | +0.0066 |
+| LoCoMo | hit@10 | 0.9549 | 0.9549 | flat |
+| LoCoMo | MRR | 0.7784 | **0.7921** | +0.0137 |
+| Chinese | all four | 0.9500/1.0000/1.0000/0.9613 | identical | unchanged |
+| PrecisionMemBench | pass / active | 74/77, 42/43 | identical | unchanged |
+| LongMemEval-s | all four | 0.8660/0.9511/0.9660/0.8990 | identical | unchanged |
+| real store | hit@1 | 0.4867 | identical | unchanged |
+
+The shipped number is 0.7054, and neither the grid nor the first version of this
+entry had it right. The grid re-ranks a top-10 window per query -- enough to
+compare signals, not enough to price the configuration -- and had no term floor.
+`bench/locomo/floor_attribution_probe.py` runs both through the store, which
+re-ranks all 272 candidates:
+
+```
+                                             hit@1    hit@5   hit@10
+no proximity (D-041 baseline)               0.6826   0.9020   0.9549
+proximity, no term floor                    0.7100   0.9079   0.9556
+proximity, term floor 5 (shipped)           0.7054   0.9086   0.9549
+```
+
+So the grid *understated* the signal by 0.0020 (top-10 window versus the whole
+corpus) and the term floor costs **0.0046**, not the 0.0026 an earlier version
+of this entry claimed from subtracting 0.7054 from the grid's 0.7080. That
+subtraction was a guess between two differently-measured numbers, which is
+exactly the error D-015 exists to prevent. Paying 0.0046 to leave the real
+store's 0.4867 intact is still the right trade, and it is now a measured one.
+
+By category, proximity helps where a question names an event and hurts where it
+names a fact: open-domain 0.7586 -> 0.7919, temporal 0.6656 -> 0.6906,
+multi-hop 0.4270 -> 0.4494, **single-hop 0.5552 -> 0.5445**. Single-hop is a
+short factual lookup inside one session; the same boundary the term floor
+encodes. The category table is published as measured, net positive.
+
+**Cost.** `bench/locomo/cost_probe.py`, `bench/real/ab_probe.py` and
+`bench/real/memory_probe.py`, three repeats each on an otherwise idle machine:
+
+```
+                              rebuild      query
+LoCoMo (272 long sessions)    486-543 ms   12.2-13.2 ms   without proximity
+                              474-631 ms   20.6-21.1 ms   with proximity  (~1.7x)
+real store (2,910 short turns)   -           4.8-5.0 ms    either way (noise)
+```
+
+The rebuild column does not move because the sequence cache is a list append
+alongside the `Counter` that was already being built. The query column nearly
+doubles on LoCoMo and does not move on the real store, which is the same
+boundary the guards draw: every LoCoMo session is 500-1100 index tokens and
+clears the three-window floor, and only 9.8% of real memories do.
+
+An earlier version of this table said 14.8 -> 46.9 ms. That was measured while a
+reviewer was running benchmarks on the same box, and a 3.5x claim would have
+been wrong by a factor of two. Repeats are cheap; the number is not.
+
+Memory for the sequence cache on the real store: **+2.1 MB** (36.04 -> 38.15 MB
+of index, 233,241 tokens over 2,910 documents). The tokens are references to the
+strings the term counters already hold, not copies, so the delta is the list
+slots and their overhead.
+
+An earlier version of this paragraph said 2,897 documents for a stored 2,910,
+and the discrepancy was a real bug rather than rounding: the probes copied the
+database with `shutil.copy2`, which takes the main file and leaves the
+write-ahead log behind. Thirteen committed memories lived only in the `-wal`.
+`bench.real.probe.snapshot()` now copies through SQLite's backup API, which reads
+the log, and every probe uses it. The retrieval numbers moved with the fix
+(0.4700 -> 0.4867 on the same seed) not because those 13 memories were special
+but because `build_queries` samples its queries from the store, so a different
+snapshot is a different query set. Treat the real-store baseline as a property of
+a snapshot and re-measure it, rather than as a constant.
+
+The LoCoMo fixture is 272 entire conversations at 500-1100 index tokens each,
+so every session clears the three-window floor and every question clears the
+term floor. The real store is the other shape: median 63 index tokens, **9.8%
+of memories above the floor**, and no query long enough to fire the signal. The
+cost lands where the benefit is and nowhere else.
+
+**Pruning: written, measured, removed.** The first version carried two bounds --
+one from the terms a document contains at all, one from the maximum possible
+boost -- and both were wrong in ways that returned fewer results than asked for:
+
+- `>` where `>=` was needed meant `pool` was only truncated once it held
+  `top_k + 1` entries, so the frontier was never assigned. It stayed `inf`, every
+  later document passed the per-document test and was skipped, and `top_k=1`
+  returned one document whatever the corpus held.
+- `<=` where `<` was needed dropped documents that tie the k-th place. The final
+  order breaks ties by insertion order, which is uncorrelated with the score, so
+  a document whose best possible score equals the current k-th score can still
+  belong ahead of it.
+
+Both were caught in review, after a first set of tests passed them. That is the
+part worth recording: the tests asserted "small `top_k` matches a full walk" over
+documents that were 35-69 tokens, below the three-window floor, so proximity
+never ran and all three alphas produced one ranking. A test that cannot reach the
+code it names is worse than no test, because it reports success.
+
+Fixing the comparisons was not the end. `bench/locomo.pruning_effect_probe`
+instrumented `window_proximity` and counted calls: **271.6 per query out of 272
+candidates, in both call shapes**. Neither bound fires at the shipped alpha. The
+ceiling is 2.5x, so no realistic gap between neighbouring scores clears it, and
+LoCoMo's sessions carry most of a question's terms, so the per-document bound is
+near 1 as well. Sixty lines of bound arithmetic that never fire, and that had
+already produced two wrong-answer bugs, is a worse trade than 8 ms -- so the
+bounds are gone and `_apply_proximity` is a scoring loop and a sort.
+
+**The tag filter does the work twice, and that is a real cost not fixed here.**
+`MemoryStore.search` ranks the whole corpus and filters afterwards, because the
+scope filter has to see the full ranking before truncating (D-025). On LoCoMo
+that means every query scores proximity on all 272 sessions when only ~27 belong
+to the sample it asked about -- about 90% of the work is on documents the caller
+asked to exclude. Pushing the filter into the ranker would fix it; that changes
+the `top_k` contract and is a separate decision.
+
+**Rejected.** `bench/locomo/rerank_probe.py`, same fixture, each on top of the
+published configuration:
+
+| signal | best hit@1 | verdict |
+|---|---|---|
+| min-span (shortest window holding every term) | 0.6963 | +0.014, below the 40-token window |
+| early-position (first match near the top) | 0.6826 | no effect at any alpha |
+| window 100 tokens | 0.6982 | worse than 40 |
+
+All three rows come from `bench/locomo/rerank_probe.py`, which takes its
+`window_proximity` from the shipping tokeniser rather than reimplementing it.
+
+`early-position` is recorded because it was the most plausible of the three and
+did nothing: a session's matching passage is as often in the middle as at the
+start.
+
+A fourth variant was tried and is **not** in the table. Scaling the window as a
+fraction of document length instead of fixing it in tokens scored 0.6937 and was
+rejected -- but the parameter was removed with the rest of the pruning work, so
+that number can no longer be reproduced. It is a note, not a result; anyone
+reviving the idea should re-measure rather than cite 0.6937.
+
+**Caveats.**
+
+- The signal assumes a question names more than one thing. It is turned off
+  below five ASCII terms, which means a long English question with a small
+  vocabulary gets no proximity at all -- correct by the measurement, invisible
+  to a benchmark that never asks one.
+- The three guards are thresholds, and thresholds are where a future corpus will
+  disagree. All three are now constants with the measurement attached
+  (`PROXIMITY_WINDOW`, `PROXIMITY_BONUS`, `PROXIMITY_MIN_TERMS`,
+  `PROXIMITY_MIN_DOC_TOKENS`, where 0 means three windows) rather than derived,
+  so changing one is a decision with a number behind it -- and
+  `bench.guard_attribution_probe` re-measures two of them on demand. The ASCII
+  filter is a code path, not a constant, and has no switch.
+- **A test that cannot reach the code it names reports success.** This file's
+  first pruning tests asserted "small `top_k` matches a full walk" over 35-69
+  token documents, below the 120-token floor, so proximity never ran and three
+  alphas produced one identical ranking. The guard tests for the term floor and
+  the ASCII filter had the same shape: deleting the guard they were named after
+  left them green. Every guard test is now arranged so removing the guard flips
+  its result, and that was checked by removing each one.
+- Windows are counted in index tokens. Chinese indexes roughly two tokens per
+  character, so a window that means "one passage" in English would mean "two
+  sentences" there. The ASCII guard makes that moot rather than solving it: a
+  Chinese proximity signal would need its own window, measured separately.
+- **`Evidence.score` is no longer a BM25 score.** It is BM25 scaled by up to
+  `(1 + PROXIMITY_BONUS)`, and whether that factor applies depends on the query's
+  length, so the same session can carry a different score for two differently
+  shaped questions about it. Ordering and within-result ratios are still valid;
+  absolute thresholds and cross-query comparisons were already invalid (D-008)
+  and are now more so. The field says this where it is declared.
+  **`b4a_recall` returns it to clients** (`mcp_server.py`), rounded to three
+  decimals and with no indication of scale, so an agent comparing a score from
+  before this change with one from after is comparing two different units. The
+  same warning already applied to the phrase bonus in D-041; this change widens
+  it by a factor of up to 2.5 and deserves saying plainly rather than being left
+  to be discovered.
+- **A probe must isolate a bonus the store already ships.** `proximity_sweep`,
+  `rerank_probe` and `diagnose` all read `store.search()` scores and apply a
+  signal of their own. Once `PROXIMITY_BONUS` went live, the alpha=0 row stopped
+  reproducing 0.6826 and started reporting the shipped result -- the probes were
+  measuring their own output twice. `bench.retrieval.isolated_bonus` exists for
+  this and all three use it. This is the D-015 failure in a new shape: the probe
+  has to measure the shipping code, and it also has to *control* it.

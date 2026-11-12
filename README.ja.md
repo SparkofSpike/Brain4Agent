@@ -255,8 +255,8 @@ MRR      0.8990
 |---|---|---|---|
 | LongMemEval `s` | hit@10 | 0.9660 | — |
 | PrecisionMemBench | active | **42/43** | 18/43 (open-knowledge-format) |
-| PrecisionMemBench | total | **72/77** | 36/77 (open-knowledge-format) |
-| LoCoMo | hit@1 | **0.6310** | 比較不可 |
+| PrecisionMemBench | total | **74/77** | 36/77 (open-knowledge-format) |
+| LoCoMo | hit@1 | **0.7054** | 比較不可 |
 
 ### PrecisionMemBench — 検索精度
 
@@ -266,7 +266,7 @@ MRR      0.8990
 
 ```
 active  42/43 = 0.9767     クエリ依存の検索が必要なケース
- total  72/77 = 0.9351     どのストアでも通るケースを含む
+ total  74/77 = 0.9610     どのストアでも通るケースを含む
 ```
 
 結果集合のサイズを、クエリに含まれる名前の数から決めるようにした。8 語未満で
@@ -281,7 +281,7 @@ active  42/43 = 0.9767     クエリ依存の検索が必要なケース
 System                  Active    Total
 ----------------------  ------    -----
 tenure (the authors)    43/43     77/77
-this store              42/43     72/77
+this store              42/43     74/77
 open-knowledge-format   18/43     36/77
 atomicmemory             5/43     16/77
 supermemory              2/43     15/77
@@ -302,10 +302,10 @@ a-mem                    0/43      7/77
 272 セッション、5882 ターンに対する 1540 の質問。
 
 ```
-hit@1   0.6310
-hit@5   0.8870
-hit@10  0.9484
-MRR     0.7402
+hit@1   0.7054
+hit@5   0.9086
+hit@10  0.9549
+MRR     0.7921
 ```
 
 `python -m bench.locomo.run`——モデルなし、データはコミット済み。これは
@@ -411,7 +411,7 @@ LoCoMo セッションのチャンク化（D-037）、LongMemEval をストア�
 トークナイザで走らせること（D-037）。
 
 リリース履歴は [CHANGELOG.md](CHANGELOG.md) に。
-[決定ログ](docs/decisions.md) は 40 項目を記録している。
+[決定ログ](docs/decisions.md) は 42 項目を記録している。
 [リサーチノート](docs/research.md) と
 [ランドスケープ分析](docs/landscape.md) が周辺領域を扱う。
 
@@ -426,7 +426,7 @@ python -m bench.pmb.run
 python -m bench.locomo.run
 ```
 
-`bench/zh/e2e.py` は `hit@1 0.9500`、`bench.pmb.run` は `pass 72/77`、
+`bench/zh/e2e.py` は `hit@1 0.9500`、`bench.pmb.run` は `pass 74/77`、
 `bench.locomo.run` は `hit@1 0.6310` を報告するはずだ。下回れば回帰。
 最後の二つは API キーもネットワークも要らない。設計上の決定を変えるときは、
 根拠となる測定とともに `docs/decisions.md` へ新しい項目を追加すること。
