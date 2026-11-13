@@ -6,6 +6,14 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `bench/storage/probe.py` measures what the storage layer costs and where it
+  stops being free: resident memory per index token, query latency by query
+  shape, and the full index rebuild that follows a local write. The last one was
+  invisible to every read-only benchmark, and it is the largest number in the
+  set: 402 ms at 2,925 memories against 4 ms for a warm keyword query (D-043).
+
 ## [0.1.0] - 2026-11-12
 
 First minor release. Six decision-log entries ship here (D-037 to D-042), all

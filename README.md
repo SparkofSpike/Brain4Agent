@@ -210,9 +210,26 @@ in-memory index is a counting exercise.
 Writes commit in batches. A 1,016-turn import takes 3.8 s one commit at a time
 and 0.25 s inside `batch()`.
 
-Rebuild also builds the phrase pair index when English summaries are in play
-(D-041), which roughly doubles that column: 8.9 ms for the 127-turn corpus and
-60 ms for 1,016 turns on the machine this was last measured on.
+The rebuild column in that table is the oldest measurement in this README. Two
+later changes both live in the rebuild: the phrase pair index (D-041), which
+roughly doubles the column, and the sequence cache (D-042). Re-measured on the
+same machine against one real store, rebuilding now costs **18.0 ms at 127 turns,
+101 ms at 1,016 and 393 ms at 2,925** -- three to four times the numbers above.
+The table is kept because its shape is still right and the import column is still
+current; use the new figures for anything that depends on open latency (D-043).
+
+The file is SQLite because of the writes, not the reads: retrieval happens in
+the in-memory index, while every search credits access counts with one commit,
+and the MCP server and the CLI can hold the same file at once. WAL mode means
+"one file" is three on disk -- `brain.db`, `brain.db-wal`, `brain.db-shm` -- and
+a snapshot must go through SQLite's backup API rather than a file copy, which
+leaves the log behind and drops committed rows.
+
+The cost to know about is not the file. A local write marks the store dirty and
+the next search rebuilds the whole index: **402 ms at 2,925 memories**, against
+4 ms for a keyword query once warm. Resident memory is the other ceiling --
+145 bytes per index token, about 1.2 GB at 100k memories. Both belong to the
+in-memory index layer, not to SQLite (D-043).
 
 ### Read/write tokenizer split
 
@@ -481,7 +498,7 @@ on the store's own tokenisers (D-037), chunking LoCoMo sessions (D-037),
 minimum-span and early-position re-ranks (D-042).
 
 Release history is in [CHANGELOG.md](CHANGELOG.md). The
-[decision log](docs/decisions.md) records 42 entries; the
+[decision log](docs/decisions.md) records 43 entries; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the field.
 

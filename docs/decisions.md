@@ -2666,3 +2666,202 @@ reviving the idea should re-measure rather than cite 0.6937.
   measuring their own output twice. `bench.retrieval.isolated_bonus` exists for
   this and all three use it. This is the D-015 failure in a new shape: the probe
   has to measure the shipping code, and it also has to *control* it.
+
+## D-043 SQLite is a consequence of two constraints, not a comparison
+
+**Date:** 2026-11-13
+**Status:** In force. Revisit the index layer, not the database, when a local
+write costs more than a second before the next query is answerable.
+
+**Context.** After 42 entries, none records why the store is SQLite. It arrived
+as the intersection of two earlier decisions -- D-004 (no dependency before a
+measured win) and D-013 (position at "Chinese + no model + single file") -- and
+was never compared against an alternative. The fair question is whether that was
+reasoning or inertia from `neural-memory`. This entry answers with measurements
+and states where the choice stops holding.
+
+**The fact that decides most of it.** SQLite is not the retrieval engine. Rows
+are read into an in-memory BM25 index, every search ranks that index, and the
+only write a search makes is one transaction crediting the turns that matched
+(`store.py`, `_ensure_fresh` and the `executemany` at the end of `search`). An
+engine swap would therefore leave recall and ranking untouched. It would change
+write cost, portability and the process model -- which is what is measured here.
+
+**Measured.** `bench/storage/probe.py` against a 2,925-row snapshot of a real
+store, repeated runs on an idle machine:
+
+| | 2,925 rows |
+|---|---|
+| db file | 3.35 MB |
+| index tokens (the `tokens` column) | 242,398 (83 per memory) |
+| resident (whole store object graph) | 35.12 MB |
+| resident per token | 145 bytes |
+| resident per memory | 11.7 KB |
+| full scan, 16 columns | 25-27 ms |
+| open and build the index | 353-403 ms |
+| **first search after a local write** | **402 ms** |
+| query, 2-3 keywords | 3.8-4.6 ms |
+| query, 40-character sentence | 20.7-25.8 ms |
+| write per search (1 commit, 5 rows) | 0.12-0.17 ms |
+
+**The row that matters is the one marked in bold.** `add()` sets `_dirty`; the
+next `search()` calls `_ensure_fresh`, sees the flag and rebuilds the whole
+index. A read-only benchmark never touches that path, so the first version of
+this probe reported the open cost and left writes looking free. In an agent loop
+that stores a turn and immediately asks a question -- the ordinary shape -- this
+is the dominant latency, twice the open cost, and it has nothing to do with
+SQLite: the cost is the in-memory index layer above it.
+
+For the same reason `PRAGMA data_version` is not the 55us win an older docstring
+in `store.py` implies. The pragma costs 6.4 us (measured, 200 samples), and when
+it reports a sibling's commit it triggers the same full rebuild. A long-lived MCP
+server and a CLI on one file therefore pay 400 ms on the first query after either
+writes.
+
+`resident` is the whole object graph, not an isolated index: `Memory` instances,
+`_by_session`, `_by_id`, the per-session lowercase text, the term counters and
+the sequence cache. That is the number competing for RAM, so it is the number a
+budget should use; `tracemalloc` sees Python objects and not allocator overhead,
+so treat it as a lower bound. The corpus is a live store: a re-run one memory
+later reports 2,926 rows and 35.23 MB. These are properties of a snapshot (D-042
+made the same point about the real-store baseline), not constants.
+
+**Not attributable to proximity.** Keyword queries are ~5x faster than
+40-character ones, and it is tempting to call that the proximity pass. It is not:
+`PROXIMITY_MIN_TERMS` is 5, it counts only ASCII alphabetic terms
+(`tokenize._phrasable`), and only 3 of 48 sampled queries clear that bar. The
+difference is query length. The probe now prints the fired count so the two do
+not get conflated again.
+
+Linearity was checked on synthetic stores at 34 tokens per memory, shorter than
+the real corpus:
+
+| rows | resident | per token | open | first search after write |
+|---|---|---|---|---|
+| 3,000 | 17.5 MB | 169 B | 169 ms | 182 ms |
+| 20,000 | 111.9 MB | 162 B | 1,289 ms | 1,424 ms |
+
+Per-token cost moves 4% across a 6.7x range, and the rebuild scales with it. The
+synthetic corpus is template-generated and far more repetitive than real
+memories, so its query latency is pessimistic; its size and rebuild numbers are
+the usable part.
+
+**Projected.** At 83 tokens per memory and 145 bytes per token:
+
+| memories | resident |
+|---|---|
+| 10,000 | 120 MB |
+| 100,000 | 1.2 GB |
+| 1,000,000 | 12 GB |
+
+Read that against the rebuild measurements, not the file size: at 20k rows the
+first query after a write already costs 1.4 s, which is where this design stops
+being usable regardless of how much RAM is left. The two corpora do not convert
+cleanly -- the real store packs 83 index tokens per memory against the synthetic
+34 -- so the real store reaches a one-second rebuild nearer 7k memories than
+20k. Re-measure rather than scale.
+
+**An accounting gap, stated rather than smoothed.** D-042 reports 38.15 MB of
+index over 233,241 tokens (163.6 bytes per token) for the same store. This entry
+reports 35.12 MB over 242,398 tokens (145 bytes per token) on a later snapshot.
+The two differ by 12% and the earlier measurement does not record its method, so
+this entry does not claim D-042 was wrong; the extrapolation uses the numbers
+from one run of one probe, and anyone comparing the two should re-measure rather
+than subtract.
+
+A second stale number turned up the same way. The README's rebuild column says
+3.9 ms for 127 turns and 29 ms for 1,016; re-measured against one real store the
+figures are **18.0, 101 and 393 ms** for 127, 1,016 and 2,925 turns. The table
+predates the phrase pair index (D-041) and the sequence cache (D-042), both of
+which live in the rebuild. The README now says so next to the table instead of
+quietly carrying a number that contradicts the 402 ms above.
+
+**Alternatives, each losing on a constraint rather than on taste.**
+
+- **JSONL, or one file per session.** Loses transactions, the per-search commit
+  that credits access counts, and cheap concurrent reads. Crash recovery becomes
+  hand-rolled.
+- **DuckDB.** An analysis engine with one writer, and not in the standard
+  library. This workload is writes and point reads, not column scans.
+- **LMDB / RocksDB.** No SQL, compiled dependency. Breaks the zero-dependency
+  install that D-004 and `pyproject.toml` still hold to.
+- **PostgreSQL / MySQL.** A service to install, a port and credentials to own.
+  Breaks "single file" from D-013 and the `pip install` story in the README.
+- **A vector store.** Breaks the zero-model core (D-004, `landscape.md`). At most
+  an optional second retriever, never the store of record.
+
+**Where SQLite earns its place, in shipping code rather than in principle.**
+
+- `journal_mode=WAL` + `synchronous=NORMAL`: every search commits a write, and
+  the default rollback journal would fsync per commit. Both are per connection;
+  a bare `sqlite3.connect` defaults to `FULL`, which is why this probe sets it
+  explicitly.
+- `PRAGMA data_version`: two processes can hold the file, and a stale index is
+  worse than a slow one. Cost 6.4 us, consequence 400 ms -- see above.
+- `ORDER BY rowid`: write order, because `created_at` has second precision and
+  ties are otherwise resolved arbitrarily.
+- `backup()`: not on the hot path, but it is the only correct snapshot. A file
+  copy drops the `-wal` and lost 13 committed memories (D-042);
+  `bench.real.probe.snapshot` is where that lives.
+
+**What the `neural-memory` lineage actually is.** The shape is shared; the
+architecture is not. neural-memory's own brain file -- at the default location
+`bench/nmem/import_to_b4a.py` already documents -- is also SQLite, with **37
+application tables** next to the FTS5 shadow tables and **6 FTS5 triggers**
+(`fibers_ai/ad/au`, `neurons_ai/ad/au`) whose bodies all call `cjk_spaced()`:
+a user function that inserts spaces between Han characters at write time so
+`unicode61` can index them. Counted from `sqlite_master` over a read-only URI;
+the query is in the reproduce block below, because a number here is otherwise
+unreproducible. The path is deliberately not repeated here -- the checker in
+`tools/` refuses machine-local paths in published files, and it caught the
+first draft of this entry.
+
+`store.py` opens by rejecting that exact approach: FTS5's tokeniser cannot be
+replaced from Python, `unicode61` treats a Han run as one token, and pre-spaced
+text has to be kept in step with triggers. `bench/nmem/` exists because that
+database is a real corpus with real recall history, not because it is a template.
+
+**The gap this entry does not close.** "Single file" in D-013 was chosen because
+it was the unoccupied position in `landscape.md`, not because it was measured as
+the best option. No user has run this at 100k memories. The projection is
+arithmetic on one 2,925-row corpus.
+
+**Exit condition.** Revisit the index layer, not the database, when a local write
+costs more than about a second before the next query can be answered. On this
+machine and this corpus that lands near 7k memories: 402 ms at 2,925, scaled
+proportionally. It is an extrapolation from one point, not a measurement, so
+treat the crossover as approximate. It arrives well before the resident index
+becomes a memory problem. The second trigger is non-technical: a requirement for
+more than one writer process, which no measurement here addresses.
+
+At that point the order is an on-disk inverted index or FTS5 with a compiled
+tokeniser, with SQLite still holding text and metadata. Only a remote or
+multi-writer deployment argues for a server database, and that is a different
+product. This entry deliberately does not patch the rebuild: incremental index
+maintenance is a design change with its own measurements, and it should not
+arrive as a footnote to a storage choice.
+
+**Reproduce.**
+
+```bash
+python -m bench.storage.probe --db <copy-of-store>
+python -m bench.storage.probe --synth 20000
+```
+
+The `neural-memory` counts, read-only, without touching memory text. Point it
+at that project's brain file, which is where `bench/nmem/` reads from:
+
+```python
+import sqlite3, sys
+
+c = sqlite3.connect(f"file:{sys.argv[1]}?mode=ro", uri=True)
+for typ in ("table", "trigger"):
+    names = [n for (n,) in c.execute(
+        "select name from sqlite_master where type=?", (typ,))]
+    print(typ, len(names))
+print([n for (n,) in c.execute(
+    "select name from sqlite_master where type='trigger' and sql like '%cjk_spaced%'")])
+```
+
+Run it on an idle machine: an earlier draft of a D-042 latency number was
+measured while benchmarks ran in parallel and was wrong by 2x.
