@@ -122,15 +122,22 @@ imported 4 turns across 2 sessions
 }}}
 ```
 
-Five tools:
+Six tools:
 
 | Tool | Purpose |
 |---|---|
 | `b4a_remember` | Store one turn; returns a session id |
+| `b4a_supersede` | Replace an outdated memory with an existing correction; keeps history |
 | `b4a_recall` | Search; returns sessions with `corpus_missing` and per-session `missing_terms` |
 | `b4a_ask` | Retrieve and answer in one step; needs a model, and says so when none is configured |
 | `b4a_session` | Read a whole session in order |
 | `b4a_stats` | Counts |
+
+To correct a fact, store its replacement with `b4a_remember`, then call
+`b4a_supersede` with `old_id` and `new_id`. Memory IDs are returned by
+`b4a_remember`, as `memory_id` in recall evidence, and as `id` in session turns.
+Recall follows the replacement even when queried with the old wording;
+`b4a_session` keeps both turns and shows `superseded_by` on the old one.
 
 The same library is also packaged as an agent [skill](integrations/).
 
@@ -498,7 +505,7 @@ on the store's own tokenisers (D-037), chunking LoCoMo sessions (D-037),
 minimum-span and early-position re-ranks (D-042).
 
 Release history is in [CHANGELOG.md](CHANGELOG.md). The
-[decision log](docs/decisions.md) records 43 entries; the
+[decision log](docs/decisions.md) records 44 entries; the
 [research notes](docs/research.md) and [landscape analysis](docs/landscape.md)
 cover the field.
 

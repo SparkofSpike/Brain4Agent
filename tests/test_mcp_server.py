@@ -49,6 +49,7 @@ class TestHandshake:
         names = {t["name"] for t in out["result"]["tools"]}
         assert names == {
             "b4a_remember",
+            "b4a_supersede",
             "b4a_recall",
             "b4a_ask",
             "b4a_session",
@@ -78,6 +79,78 @@ class TestTools:
         out = call(server, "b4a_remember", {"content": "中文查询搜不到记忆"})
         assert "stored" in text_of(out) and "session" in text_of(out)
         assert out["result"]["isError"] is False
+
+    def test_correct_memory_through_mcp(self, server: Server) -> None:
+        old_reply = call(
+            server,
+            "b4a_remember",
+            {
+                "content": "AgentFS filesystem validation: 131 tests pass.",
+                "session_id": "initial",
+            },
+        )
+        new_reply = call(
+            server,
+            "b4a_remember",
+            {
+                "content": "All 134 SDK checks passed in WSL.",
+                "session_id": "validated",
+            },
+        )
+        old = json.loads(text_of(call(server, "b4a_session", {"session_id": "initial"})))[0]
+        new = json.loads(text_of(call(server, "b4a_session", {"session_id": "validated"})))[0]
+        assert old["id"] in text_of(old_reply)
+        assert new["id"] in text_of(new_reply)
+
+        args = {"old_id": old["id"], "new_id": new["id"]}
+        for _ in range(2):  # A retried tool call is harmless.
+            reply = call(server, "b4a_supersede", args)
+            assert reply["result"]["isError"] is False
+            assert json.loads(text_of(reply)) == args
+
+        result = json.loads(text_of(call(server, "b4a_recall", {"query": "filesystem"})))
+        assert [e["session_id"] for e in result["evidence"]] == ["validated"]
+        assert result["evidence"][0]["memory_id"] == new["id"]
+        history = json.loads(text_of(call(server, "b4a_session", {"session_id": "initial"})))
+        assert history[0]["content"] == old["content"]
+        assert history[0]["superseded_by"] == new["id"]
+
+        from brain4agent import MemoryStore
+
+        with MemoryStore(server.store.path) as reopened:
+            assert reopened.memory(old["id"]).superseded_by == new["id"]
+            assert reopened.search("filesystem").best().session_id == "validated"
+
+    @pytest.mark.parametrize(
+        "args",
+        [
+            {},
+            {"old_id": "", "new_id": "missing"},
+            {"old_id": 3, "new_id": "missing"},
+            {"old_id": "missing", "new_id": "also-missing"},
+        ],
+    )
+    def test_invalid_supersession_is_tool_error(self, server: Server, args: dict) -> None:
+        out = call(server, "b4a_supersede", args)
+        assert out["result"]["isError"] is True
+        assert len(server.store) == 0
+
+    def test_supersession_rejects_self_and_cycles(self, server: Server) -> None:
+        ids = [
+            server.store.add(content) for content in ("initial tests", "new checks", "latest run")
+        ]
+        for old, new in [(ids[0], ids[1]), (ids[1], ids[2])]:
+            assert (
+                call(server, "b4a_supersede", {"old_id": old, "new_id": new})["result"]["isError"]
+                is False
+            )
+        for old, new in [(ids[2], ids[2]), (ids[2], ids[0]), (ids[1], ids[0])]:
+            out = call(server, "b4a_supersede", {"old_id": old, "new_id": new})
+            assert out["result"]["isError"] is True
+        assert server.store.memory(ids[0]).superseded_by == ids[1]
+        assert server.store.memory(ids[1]).superseded_by == ids[2]
+        assert server.store.memory(ids[2]).superseded_by is None
+        assert server.store.search("initial").best().memory.id == ids[2]
 
     def test_remember_empty_content(self, server: Server) -> None:
         out = call(server, "b4a_remember", {"content": "   "})

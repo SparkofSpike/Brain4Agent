@@ -2865,3 +2865,23 @@ print([n for (n,) in c.execute(
 
 Run it on an idle machine: an earlier draft of a D-042 latency number was
 measured while benchmarks ran in parallel and was wrong by 2x.
+
+---
+
+## D-044 Explicit corrections are reachable through MCP
+
+**Context.** Recording an initial test count and its later correction through
+MCP left recall returning the old count. The store already supported
+`supersede(old, new)`, but MCP exposed neither that operation nor memory IDs.
+An agent could append the correction but could not identify it as a replacement.
+
+**Decision.** Add `b4a_supersede(old_id, new_id)` over the existing store method.
+Remember, recall and session expose memory IDs; session turns also show the
+replacement link. The caller chooses which fact is replaced, and both turns
+remain stored. Cycles are refused before changing the store.
+
+**Measured.** In a real stdio session, a query for "AgentFS filesystem validation"
+initially returned the 131-test note. After linking its correction, the same
+query returned the 134-test note even though that note used different words.
+Reading the original session still returned its text and replacement ID.
+This changes the MCP capability, not the retrieval algorithm.

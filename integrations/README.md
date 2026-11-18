@@ -15,7 +15,8 @@ The default integration. Any MCP client can load it:
 }}}
 ```
 
-Tools: `b4a_remember`, `b4a_recall`, `b4a_session`, `b4a_stats`. The prefix
+Tools: `b4a_remember`, `b4a_supersede`, `b4a_recall`, `b4a_ask`,
+`b4a_session`, `b4a_stats`. The prefix
 keeps them from colliding with another memory server in the same client.
 
 Requires `pip install -e ".[precise]"` (or `pip install Brain4Agent[precise]`

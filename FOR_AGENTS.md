@@ -84,7 +84,7 @@ Add this to the client's MCP configuration and restart it:
 database per project, and use the same path for the whole task — a memory
 written to one file is invisible from another.
 
-Five tools:
+Six tools:
 
 - **`b4a_remember`** — store one turn; returns a session id. Pass `session_id`
   to append to an existing conversation. Store raw text by default:
@@ -97,6 +97,11 @@ Five tools:
   `BRAIN4AGENT_LLM_KEY`; without it the tool says no model is configured rather
   than guessing. Use `b4a_recall` when you want the evidence.
 - **`b4a_session`** — read one whole session, in order, given its id.
+- **`b4a_supersede`** — link an outdated memory to its correction. Store the
+  replacement first, then pass `old_id` and `new_id`. Remember returns memory
+  IDs, recall names the matched `memory_id`, and session turns carry `id` and
+  `superseded_by`. Use memory IDs, not session IDs. History stays readable;
+  recall follows the replacement. Only mark a replacement the caller identifies.
 - **`b4a_stats`** — turn/session/term counts. Cheap way to check the file is the
   one you think it is.
 

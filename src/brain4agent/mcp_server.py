@@ -104,6 +104,24 @@ TOOLS: list[dict[str, Any]] = [
         },
     },
     {
+        "name": "b4a_supersede",
+        "description": (
+            "Mark an existing memory as replaced by another existing memory. "
+            "First store the correction with b4a_remember, then pass the two memory "
+            "IDs from remember, recall or session. Recall follows the replacement, "
+            "including queries using the old wording. Both turns remain in session "
+            "history. Only use when the caller explicitly identifies a correction."
+        ),
+        "inputSchema": {
+            "type": "object",
+            "properties": {
+                "old_id": {"type": "string", "description": "Memory being replaced."},
+                "new_id": {"type": "string", "description": "Memory that replaces it."},
+            },
+            "required": ["old_id", "new_id"],
+        },
+    },
+    {
         "name": "b4a_recall",
         "description": (
             "Search long-term memory. Returns ranked sessions with coverage, plus two "
@@ -226,6 +244,8 @@ class Server:
 
         if name == "b4a_remember":
             return self._remember(args)
+        if name == "b4a_supersede":
+            return self._supersede(args)
         if name == "b4a_recall":
             return self._recall(args)
         if name == "b4a_ask":
@@ -295,7 +315,20 @@ class Server:
 
         if not ids:
             return _text(f"nothing durable in that turn -- not stored (session {sid})")
-        return _text(f"stored {len(ids)} memories in session {sid}")
+        return _text(f"stored {len(ids)} memories ({', '.join(ids)}) in session {sid}")
+
+    def _supersede(self, args: dict[str, Any]) -> dict[str, Any]:
+        old_id = _arg_str(args, "old_id")
+        new_id = _arg_str(args, "new_id")
+        if not old_id or not new_id:
+            raise _ToolError("old_id and new_id must not be empty")
+        try:
+            changed = self.store.supersede(old_id, new_id)
+        except ValueError as exc:
+            raise _ToolError(str(exc)) from exc
+        if not changed:
+            raise _ToolError("old_id and new_id must identify existing memories")
+        return _text(json.dumps({"old_id": old_id, "new_id": new_id}))
 
     def _evidence_row(self, evidence: Any) -> dict[str, Any]:
         """One result row, with the metadata a caller needs to judge it.
@@ -308,6 +341,7 @@ class Server:
             self.store.memory(evidence.matched_memory_id or evidence.memory.id) or evidence.memory
         )
         return {
+            "memory_id": memory.id,
             "session_id": evidence.session_id,
             "score": round(evidence.score, 3),
             "coverage": evidence.coverage,
@@ -446,8 +480,14 @@ def _tool_error(text: str) -> dict[str, Any]:
     return {"content": [{"type": "text", "text": text}], "isError": True}
 
 
-def _turn(mem: Any) -> dict[str, str]:
-    return {"role": mem.role, "content": mem.content, "created_at": mem.created_at}
+def _turn(mem: Any) -> dict[str, Any]:
+    return {
+        "id": mem.id,
+        "role": mem.role,
+        "content": mem.content,
+        "created_at": mem.created_at,
+        "superseded_by": mem.superseded_by,
+    }
 
 
 def _log(message: str) -> None:

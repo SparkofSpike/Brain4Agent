@@ -8,6 +8,9 @@ project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- `b4a_supersede` exposes explicit memory corrections through MCP. Remember,
+  recall and session responses expose memory IDs; session history records the
+  replacement link. Supersession rejects cycles before changing either memory.
 - `bench/storage/probe.py` measures what the storage layer costs and where it
   stops being free: resident memory per index token, query latency by query
   shape, and the full index rebuild that follows a local write. The last one was

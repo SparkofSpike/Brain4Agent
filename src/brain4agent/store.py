@@ -1126,16 +1126,17 @@ class MemoryStore:
         self._dirty = True
         return len(fresh)
 
-    def _current(self, memory_id: str) -> str | None:
+    def _current(self, memory_id: str, *, stop_at: str | None = None) -> str | None:
         """Follow the supersession chain to the memory that is current now.
 
-        Returns None on a cycle. A corrupt database should make a search return
-        less, never hang.
+        Returns None on a cycle or when reaching ``stop_at``. The latter checks
+        a proposed link before writing it. A corrupt database should make a
+        search return less, never hang.
         """
         seen: set[str] = set()
         mid = memory_id
         while True:
-            if mid in seen:
+            if mid == stop_at or mid in seen:
                 return None
             seen.add(mid)
             mem = self._by_id.get(mid)
@@ -1199,6 +1200,8 @@ class MemoryStore:
             return False
         if old_id == new_id:
             raise ValueError("a memory cannot supersede itself")
+        if self._current(new_id, stop_at=old_id) is None:
+            raise ValueError("supersession must not create or extend a cycle")
 
         # The replacement inherits the old memory's index terms. Redirecting a hit
         # (D-027) recovers the session but leaves coverage near zero, because the
